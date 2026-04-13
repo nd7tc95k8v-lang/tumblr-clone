@@ -105,10 +105,17 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const brand = (
     <Link
       href="/"
-      className="mb-6 block text-text hover:opacity-90 transition-opacity"
+      className="mb-6 flex min-w-0 items-center gap-2 text-text transition-opacity hover:opacity-90"
       aria-label={APP_NAME}
     >
-      <img src="/logo/qrtz-logo.svg" alt={APP_NAME} className="h-8 w-auto" width={140} height={32} />
+      <img
+        src="/logo/qrtz-logo.svg"
+        alt=""
+        className="h-8 w-auto shrink-0"
+        width={140}
+        height={32}
+      />
+      <span className="truncate text-lg font-semibold tracking-tight">{APP_NAME}</span>
     </Link>
   );
 
@@ -119,9 +126,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-full flex flex-col bg-bg">
-      <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center border-b border-border bg-bg/95 px-4 backdrop-blur-sm md:hidden">
-        <Link href="/" className="text-text" aria-label={APP_NAME}>
-          <img src="/logo/qrtz-logo.svg" alt={APP_NAME} className="h-7 w-auto" width={120} height={28} />
+      <header className="sticky top-0 z-30 flex h-12 min-w-0 shrink-0 items-center border-b border-border bg-bg/95 px-4 backdrop-blur-sm md:hidden">
+        <Link
+          href="/"
+          className="flex min-w-0 max-w-full items-center gap-2 text-text"
+          aria-label={APP_NAME}
+        >
+          <img
+            src="/logo/qrtz-logo.svg"
+            alt=""
+            className="h-7 w-auto shrink-0"
+            width={120}
+            height={28}
+          />
+          <span className="min-w-0 truncate text-lg font-semibold tracking-tight">{APP_NAME}</span>
         </Link>
       </header>
 
