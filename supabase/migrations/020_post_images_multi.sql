@@ -51,19 +51,34 @@ create policy "post_images_select_via_post_authenticated"
     )
   );
 
--- Insert only for own posts; path must live under author folder (same rule as posts.image_storage_path).
+-- Insert: ownership check must not use a plain EXISTS on posts — SELECT on posts is RLS-gated (e.g. NSFW rows
+-- may be hidden from the author in 017), which would falsely fail this check. Use SECURITY DEFINER to read posts.
+create or replace function public.post_image_row_insert_allowed(p_post_id uuid, p_storage_path text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.posts p
+    where p.id = p_post_id
+      and p.user_id = auth.uid()
+      and p.reblog_of is null
+  )
+  and coalesce(nullif(trim(p_storage_path), ''), '') <> ''
+  and split_part(trim(p_storage_path), '/', 1) = auth.uid()::text;
+$$;
+
+revoke all on function public.post_image_row_insert_allowed(uuid, text) from public;
+grant execute on function public.post_image_row_insert_allowed(uuid, text) to authenticated;
+
 create policy "post_images_insert_own_post"
   on public.post_images for insert
   to authenticated
   with check (
-    exists (
-      select 1
-      from public.posts p
-      where p.id = post_images.post_id
-        and p.user_id = auth.uid()
-        and p.reblog_of is null
-        and storage_path like (auth.uid())::text || '/%'
-    )
+    public.post_image_row_insert_allowed(post_id, storage_path)
   );
 
 create policy "post_images_delete_own_post"

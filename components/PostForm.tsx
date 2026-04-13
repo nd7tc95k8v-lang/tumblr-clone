@@ -68,11 +68,12 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
 
   const canAddCount = useMemo(() => Math.max(0, MAX_POST_IMAGES - selectedFiles.length), [selectedFiles.length]);
 
-  const addValidatedFiles = useCallback((incoming: Iterable<File>) => {
+  const addValidatedFiles = useCallback((incoming: readonly File[]) => {
+    const batch = Array.from(incoming);
     setSelectedFiles((prev) => {
       const next = [...prev];
       let firstError: string | null = null;
-      for (const f of Array.from(incoming)) {
+      for (const f of batch) {
         if (next.length >= MAX_POST_IMAGES) break;
         const img = validateImageFile(f);
         if (!img.ok) {
@@ -99,7 +100,12 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
     } = await supabase.auth.getUser();
 
     if (userError || !user) {
-      setFormError("You must be logged in to post.");
+      const detail = userError?.message?.trim();
+      setFormError(
+        detail
+          ? `Sign-in check failed: ${detail}`
+          : "You must be logged in to post.",
+      );
       return;
     }
 
@@ -137,6 +143,11 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
 
         if (insertError) {
           console.error(insertError);
+          const msg =
+            insertError.message?.trim() ||
+            insertError.code ||
+            "Could not create your post.";
+          setFormError(`Post draft failed: ${msg}`);
           await alertIfLikelyRateOrGuardFailure(supabase, insertError, { kind: "post" });
           return;
         }
@@ -160,7 +171,8 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
 
             if (uploadError) {
               console.error(uploadError);
-              throw new Error(uploadError.message?.trim() || "Image upload failed.");
+              const m = uploadError.message?.trim() || "Image upload failed.";
+              throw new Error(`Image upload failed: ${m}`);
             }
             uploadedPaths.push(filePath);
           }
@@ -175,7 +187,9 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
             );
             if (piError) {
               console.error(piError);
-              throw new Error(piError.message?.trim() || "Could not save image attachments.");
+              const m =
+                piError.message?.trim() || piError.code || "Could not save image attachments.";
+              throw new Error(`Saving image records failed: ${m}`);
             }
 
             const { error: updError } = await supabase
@@ -184,14 +198,18 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
               .eq("id", newPostId);
             if (updError) {
               console.error(updError);
-              throw new Error(updError.message?.trim() || "Could not link primary image.");
+              const m =
+                updError.message?.trim() || updError.code || "Could not link primary image.";
+              throw new Error(`Linking primary image failed: ${m}`);
             }
           }
         } catch (err) {
           for (const p of uploadedPaths) {
-            await supabase.storage.from("post-images").remove([p]);
+            const { error: rmErr } = await supabase.storage.from("post-images").remove([p]);
+            if (rmErr) console.error("Rollback: storage remove failed", rmErr);
           }
-          await supabase.from("posts").delete().eq("id", newPostId);
+          const { error: delErr } = await supabase.from("posts").delete().eq("id", newPostId);
+          if (delErr) console.error("Rollback: post delete failed", delErr);
           setFormError(err instanceof Error ? err.message : "Something went wrong.");
           return;
         }
@@ -293,7 +311,7 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
             e.stopPropagation();
             setDragActive(false);
             if (submitting || canAddCount === 0) return;
-            addValidatedFiles(e.dataTransfer.files);
+            addValidatedFiles(Array.from(e.dataTransfer.files ?? []));
           }}
           onClick={() => !submitting && canAddCount > 0 && fileInputRef.current?.click()}
           className={`cursor-pointer rounded-card border-2 border-dashed px-3 py-6 text-center transition-colors ${
@@ -314,9 +332,9 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
           className="sr-only"
           aria-label="Choose images"
           onChange={(e) => {
-            const list = e.target.files;
-            if (!list?.length) return;
-            addValidatedFiles(list);
+            const files = Array.from(e.target.files ?? []);
+            if (!files.length) return;
+            addValidatedFiles(files);
             e.target.value = "";
           }}
         />
