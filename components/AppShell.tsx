@@ -7,9 +7,8 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 
 const linkBase =
-  "block rounded-md px-3 py-2 text-sm font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/80 dark:hover:bg-zinc-800/80 hover:text-zinc-900 dark:hover:text-zinc-100";
-const linkActive =
-  "bg-zinc-200 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800";
+  "block rounded-md px-3 py-2 text-sm font-medium text-text-secondary hover:bg-bg-secondary hover:text-text transition-colors";
+const linkActive = "bg-bg-secondary text-text font-medium hover:bg-bg-secondary";
 
 type NavItem = {
   href: string;
@@ -84,8 +83,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         href="/compose"
         className={
           createActive
-            ? "mt-3 block rounded-md py-2.5 px-3 text-center text-sm font-semibold bg-blue-700 text-white"
-            : "mt-3 block rounded-md py-2.5 px-3 text-center text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700"
+            ? "mt-3 block rounded-md py-2.5 px-3 text-center text-sm font-semibold bg-primary-pressed text-white"
+            : "mt-3 block rounded-md py-2.5 px-3 text-center text-sm font-semibold bg-primary text-white hover:bg-primary-hover active:bg-primary-pressed transition-colors"
         }
       >
         Create post
@@ -96,7 +95,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const brand = (
     <Link
       href="/"
-      className="mb-6 block text-lg font-bold text-zinc-900 dark:text-zinc-50 tracking-tight hover:opacity-90"
+      className="mb-6 block text-lg font-bold text-text tracking-tight hover:opacity-90 transition-opacity"
     >
       My Tumblr Clone
     </Link>
@@ -106,9 +105,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 min-w-0 text-[11px] font-medium leading-tight text-center";
 
   return (
-    <div className="min-h-full flex flex-col bg-zinc-50 dark:bg-zinc-950">
-      <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/95 dark:bg-zinc-950/95 px-4 backdrop-blur-sm md:hidden">
-        <Link href="/" className="text-base font-bold text-zinc-900 dark:text-zinc-50">
+    <div className="min-h-full flex flex-col bg-bg">
+      <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center border-b border-border bg-bg/95 px-4 backdrop-blur-sm md:hidden">
+        <Link href="/" className="text-base font-bold text-text">
           My Tumblr Clone
         </Link>
       </header>
@@ -116,25 +115,25 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 min-h-0">
         <aside
           id="app-sidebar"
-          className="hidden md:flex w-56 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 p-4 min-h-screen"
+          className="hidden md:flex w-56 shrink-0 flex-col border-r border-border bg-bg p-4 min-h-screen"
           aria-label="Sidebar"
         >
           {brand}
           {!supabase ? (
-            <p className="mb-4 text-xs text-amber-800 dark:text-amber-200">
+            <p className="mb-4 text-xs text-text border border-warning/40 rounded-md px-2 py-1.5 bg-warning/10">
               Add Supabase env vars to enable full navigation.
             </p>
           ) : null}
           {sidebarNav}
         </aside>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 bg-bg">
           {children}
         </main>
       </div>
 
       <nav
-        className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/95 dark:bg-zinc-950/95 backdrop-blur-sm md:hidden pb-[env(safe-area-inset-bottom,0px)]"
+        className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-border bg-bg/95 backdrop-blur-sm md:hidden pb-[env(safe-area-inset-bottom,0px)]"
         aria-label="Mobile navigation"
       >
         {items.slice(0, 2).map(({ href, label, match }) => (
@@ -142,9 +141,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             key={label}
             href={href}
             className={`${bottomBar} ${
-              match(pathname)
-                ? "text-zinc-900 dark:text-zinc-100"
-                : "text-zinc-500 dark:text-zinc-400 active:bg-zinc-200/80 dark:active:bg-zinc-800/80"
+              match(pathname) ? "text-text" : "text-text-muted active:bg-bg-secondary"
             }`}
           >
             <span className="truncate max-w-full px-0.5">{label}</span>
@@ -153,12 +150,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <Link
           href="/compose"
           className={`${bottomBar} ${
-            createActive
-              ? "text-blue-700 dark:text-blue-400 font-semibold"
-              : "text-blue-600 dark:text-blue-400 active:bg-blue-50 dark:active:bg-blue-950/40"
+            createActive ? "text-primary font-semibold" : "text-primary active:bg-primary-soft/40"
           }`}
         >
-          <span className="rounded-full bg-blue-600 text-white text-[10px] font-bold px-2 py-1 leading-none mb-0.5">
+          <span className="rounded-full bg-primary text-white text-[10px] font-bold px-2 py-1 leading-none mb-0.5">
             +
           </span>
           <span className="truncate max-w-full">Post</span>
@@ -168,9 +163,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             key={label}
             href={href}
             className={`${bottomBar} ${
-              match(pathname)
-                ? "text-zinc-900 dark:text-zinc-100"
-                : "text-zinc-500 dark:text-zinc-400 active:bg-zinc-200/80 dark:active:bg-zinc-800/80"
+              match(pathname) ? "text-text" : "text-text-muted active:bg-bg-secondary"
             }`}
           >
             <span className="truncate max-w-full px-0.5">{label}</span>

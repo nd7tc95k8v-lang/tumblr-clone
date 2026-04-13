@@ -6,15 +6,17 @@ import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { fetchProfileFollowCounts } from "@/lib/supabase/follow-counts";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
-import { reblogInsertFields } from "@/lib/reblog";
+import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { normalizeUsername } from "@/lib/username";
 import type { ProfileFollowStats } from "@/types/follows";
 import type { ProfilePublic } from "@/types/profile";
 import type { FeedPost } from "@/types/post";
+import { useActionGuard } from "./ActionGuardProvider";
 import EditProfileModal from "./EditProfileModal";
 import PostCard from "./PostCard";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileUsernameLink from "./ProfileUsernameLink";
+import { useReblogAction } from "./useReblogAction";
 
 export type { ProfilePublic };
 
@@ -25,6 +27,7 @@ type Props = {
 };
 
 export default function ProfilePageClient({ profile, initialPosts, initialFollowStats }: Props) {
+  const { runProtectedAction } = useActionGuard();
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
@@ -65,38 +68,21 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
     if (!supabase) return;
     const { data, error } = await fetchFeedPosts(supabase, {
       filterUserIds: [localProfile.id],
+      viewerUserId: user?.id ?? null,
     });
     if (error) {
       console.error(error);
       return;
     }
     setPosts(data ?? []);
-  }, [supabase, localProfile.id]);
+  }, [supabase, localProfile.id, user?.id]);
 
-  const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null) => {
-      if (!supabase) return;
-      const {
-        data: { user: u },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !u) {
-        alert("You must be logged in to reblog.");
-        return;
-      }
-      const { error } = await supabase.from("posts").insert({
-        user_id: u.id,
-        ...reblogInsertFields(original, { commentary }),
-      });
-      if (error) {
-        console.error(error);
-        alert("Reblog failed.");
-        return;
-      }
-      await loadPosts();
-    },
-    [supabase, loadPosts],
-  );
+  useEffect(() => {
+    if (!supabase) return;
+    void loadPosts();
+  }, [supabase, user?.id, loadPosts]);
+
+  const handleReblog = useReblogAction(supabase, { onSuccess: loadPosts });
 
   const showReblog = Boolean(user);
   const isOwnProfile = Boolean(user && user.id === localProfile.id);
@@ -146,28 +132,44 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
           .eq("following_id", localProfile.id);
         if (error) {
           console.error(error);
-          alert("Could not unfollow.");
-          return;
+          await alertIfLikelyRateOrGuardFailure(supabase, error, {
+            kind: "follow",
+            followMode: "delete",
+          });
+        } else {
+          setIsFollowing(false);
+          await refreshFollowCounts();
         }
-        setIsFollowing(false);
-        await refreshFollowCounts();
       } else {
-        const { error } = await supabase.from("follows").insert({
-          follower_id: user.id,
-          following_id: localProfile.id,
+        await runProtectedAction(supabase, { kind: "follow", followMode: "insert" }, async () => {
+          const { error } = await supabase.from("follows").insert({
+            follower_id: user.id,
+            following_id: localProfile.id,
+          });
+          if (error) {
+            console.error(error);
+            await alertIfLikelyRateOrGuardFailure(supabase, error, {
+              kind: "follow",
+              followMode: "insert",
+            });
+            return;
+          }
+          setIsFollowing(true);
+          await refreshFollowCounts();
         });
-        if (error) {
-          console.error(error);
-          alert("Could not follow.");
-          return;
-        }
-        setIsFollowing(true);
-        await refreshFollowCounts();
       }
     } finally {
       setFollowBusy(false);
     }
-  }, [supabase, user, localProfile.id, isFollowing, followBusy, refreshFollowCounts]);
+  }, [
+    supabase,
+    user,
+    localProfile.id,
+    isFollowing,
+    followBusy,
+    refreshFollowCounts,
+    runProtectedAction,
+  ]);
 
   const handleProfileSaved = useCallback(
     (next: ProfilePublic) => {
@@ -183,9 +185,9 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
   );
 
   return (
-    <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center py-10 px-4">
+    <main className="min-h-screen bg-bg flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-xl flex flex-col gap-6">
-        <header className="bg-white dark:bg-zinc-800 rounded-lg shadow p-6">
+        <header className="bg-surface rounded-lg shadow-sm border border-border p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <ProfileAvatar
               url={localProfile.avatar_url}
@@ -198,24 +200,24 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               className="shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+              <p className="text-2xl font-bold text-text">
                 <ProfileUsernameLink usernameRaw={localProfile.username} className="font-bold text-inherit">
                   @{localProfile.username}
                 </ProfileUsernameLink>
               </p>
               {localProfile.display_name?.trim() ? (
-                <p className="text-lg text-zinc-700 dark:text-zinc-200 mt-1">{localProfile.display_name.trim()}</p>
+                <p className="text-lg text-text-secondary mt-1">{localProfile.display_name.trim()}</p>
               ) : null}
               {localProfile.bio?.trim() ? (
-                <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-3 whitespace-pre-wrap">
+                <p className="text-sm text-text-secondary mt-3 whitespace-pre-wrap">
                   {localProfile.bio.trim()}
                 </p>
               ) : null}
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-3">
-                <span className="font-medium text-zinc-700 dark:text-zinc-300">{followStats.followers}</span>{" "}
+              <p className="text-sm text-text-muted mt-3">
+                <span className="font-medium text-text-secondary">{followStats.followers}</span>{" "}
                 followers
-                <span className="mx-2 text-zinc-300 dark:text-zinc-600">·</span>
-                <span className="font-medium text-zinc-700 dark:text-zinc-300">{followStats.following}</span>{" "}
+                <span className="mx-2 text-border-soft">·</span>
+                <span className="font-medium text-text-secondary">{followStats.following}</span>{" "}
                 following
               </p>
             </div>
@@ -224,7 +226,7 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
                 <button
                   type="button"
                   onClick={() => setEditOpen(true)}
-                  className="py-1.5 px-3 text-sm font-medium rounded-md border border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700/80"
+                  className="py-1.5 px-3 text-sm font-medium rounded-md border border-border text-text hover:bg-bg-secondary transition-colors"
                 >
                   Edit profile
                 </button>
@@ -236,8 +238,8 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
                   disabled={followBusy || isFollowing === null}
                   className={
                     isFollowing
-                      ? "py-1.5 px-3 text-sm font-medium rounded-md border border-zinc-300 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700/80 disabled:opacity-50"
-                      : "py-1.5 px-3 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      ? "py-1.5 px-3 text-sm font-medium rounded-md border border-border text-text hover:bg-bg-secondary disabled:opacity-50 transition-colors"
+                      : "py-1.5 px-3 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary-hover disabled:opacity-50 transition-colors"
                   }
                 >
                   {isFollowing === null
@@ -265,11 +267,11 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
         ) : null}
 
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">
+          <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wide">
             Posts
           </h2>
           {posts.length === 0 ? (
-            <p className="text-zinc-500 dark:text-zinc-400 text-sm text-center py-8 bg-white dark:bg-zinc-800 rounded-lg shadow">
+            <p className="text-text-muted text-sm text-center py-8 bg-surface rounded-lg shadow-sm border border-border">
               No posts yet.
             </p>
           ) : (
@@ -280,10 +282,12 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
                   post={post}
                   rebloggingId={rebloggingId}
                   showReblog={showReblog}
+                  supabase={supabase}
+                  currentUserId={user?.id ?? null}
                   onReblog={async (p, commentary) => {
                     setRebloggingId(p.id);
                     try {
-                      await handleReblog(p, commentary);
+                      return await handleReblog(p, commentary);
                     } finally {
                       setRebloggingId(null);
                     }

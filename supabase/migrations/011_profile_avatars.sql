@@ -7,6 +7,12 @@ insert into storage.buckets (id, name, public)
 values ('avatars', 'avatars', true)
 on conflict (id) do update set public = excluded.public;
 
+-- Idempotent: safe if policies were created in a previous run or manually.
+drop policy if exists "avatars select public" on storage.objects;
+drop policy if exists "avatars insert own folder" on storage.objects;
+drop policy if exists "avatars update own folder" on storage.objects;
+drop policy if exists "avatars delete own folder" on storage.objects;
+
 create policy "avatars select public"
   on storage.objects for select
   using (bucket_id = 'avatars');

@@ -5,13 +5,13 @@ import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
-import { reblogInsertFields } from "@/lib/reblog";
 import { profileNeedsOnboarding } from "@/lib/username";
 import type { FeedPost } from "@/types/post";
 import AuthForm from "./AuthForm";
 import Feed from "./Feed";
 import PostForm from "./PostForm";
 import UsernameOnboarding from "./UsernameOnboarding";
+import { useReblogAction } from "./useReblogAction";
 
 type ProfileRow = { id: string; username: string | null };
 
@@ -25,6 +25,8 @@ function ClientShell() {
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
+  /** Count of accounts this user follows (excluding self). Used for empty-follow hint. */
+  const [followingOthersCount, setFollowingOthersCount] = useState<number | null>(null);
 
   const refreshSession = useCallback(async () => {
     if (!supabase) {
@@ -84,14 +86,21 @@ function ClientShell() {
           .select("following_id")
           .eq("follower_id", user.id);
         if (followError) {
+          setFollowingOthersCount(null);
           setPostsError(followError.message);
           return;
         }
         const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
+        setFollowingOthersCount(followedIds.length);
         filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
+      } else {
+        setFollowingOthersCount(null);
       }
 
-      const { data, error } = await fetchFeedPosts(supabase, { filterUserIds });
+      const { data, error } = await fetchFeedPosts(supabase, {
+        filterUserIds,
+        viewerUserId: user?.id ?? null,
+      });
       if (error) {
         setPostsError(error.message);
         return;
@@ -102,30 +111,7 @@ function ClientShell() {
     }
   }, [supabase, user]);
 
-  const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null) => {
-      if (!supabase) return;
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !user) {
-        alert("You must be logged in to reblog.");
-        return;
-      }
-      const { error } = await supabase.from("posts").insert({
-        user_id: user.id,
-        ...reblogInsertFields(original, { commentary }),
-      });
-      if (error) {
-        console.error(error);
-        alert("Reblog failed.");
-        return;
-      }
-      await loadPosts();
-    },
-    [supabase, loadPosts],
-  );
+  const handleReblog = useReblogAction(supabase, { onSuccess: loadPosts });
 
   useEffect(() => {
     if (!supabase) return;
@@ -150,10 +136,12 @@ function ClientShell() {
     if (!user) {
       setPosts([]);
       setPostsError(null);
+      setFollowingOthersCount(null);
       return;
     }
     if (needsOnboarding) {
       setPosts([]);
+      setFollowingOthersCount(null);
       return;
     }
     if (!showFeed) {
@@ -165,27 +153,22 @@ function ClientShell() {
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 bg-amber-50 dark:bg-amber-950/30 rounded-lg text-amber-900 dark:text-amber-100 text-sm">
+      <div className="w-full max-w-md mx-auto p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
         <p className="font-medium mb-2">Supabase is not configured</p>
         <p>
           Add{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900/50 px-1 rounded">
-            NEXT_PUBLIC_SUPABASE_URL
-          </code>{" "}
+          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
           and{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900/50 px-1 rounded">
+          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">
             NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
           </code>{" "}
           (or legacy{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900/50 px-1 rounded">
-            NEXT_PUBLIC_SUPABASE_ANON_KEY
-          </code>
-          ) to{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900/50 px-1 rounded">.env.local</code>{" "}
-          in the <span className="font-medium">tumblr-clone</span> folder,{" "}
-          <span className="font-medium">save the file</span>, then stop and run{" "}
-          <code className="text-xs bg-amber-100 dark:bg-amber-900/50 px-1 rounded">npm run dev</code>{" "}
-          again so Next.js picks up the variables.
+          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
+          ) to <code className="text-xs bg-bg-secondary px-1 rounded border border-border">.env.local</code> in the{" "}
+          <span className="font-medium">tumblr-clone</span> folder, <span className="font-medium">save the file</span>,
+          then stop and run{" "}
+          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">npm run dev</code> again so Next.js
+          picks up the variables.
         </p>
       </div>
     );
@@ -201,11 +184,11 @@ function ClientShell() {
         needsProfileSetup={Boolean(user && profile && profileNeedsOnboarding(profile.username))}
       />
       {!sessionReady ? (
-        <p className="text-zinc-500 text-sm">Loading…</p>
+        <p className="text-text-muted text-sm">Loading…</p>
       ) : user && profileLoading ? (
-        <p className="text-zinc-500 text-sm">Loading profile…</p>
+        <p className="text-text-muted text-sm">Loading profile…</p>
       ) : user && profileLoadFailed ? (
-        <p className="text-red-700 dark:text-red-300 text-sm max-w-md mx-auto">
+        <p className="text-error text-sm max-w-md mx-auto">
           Could not load your profile. Check the database migration for <code className="text-xs">profiles</code>{" "}
           or try signing out and back in.
         </p>
@@ -217,9 +200,22 @@ function ClientShell() {
         />
       ) : user && showFeed ? (
         <>
-          <p className="text-zinc-600 dark:text-zinc-400 text-sm text-center max-w-xl w-full">
+          <p className="text-text-secondary text-sm text-center max-w-xl w-full">
             Posts from you and people you follow.
           </p>
+          {followingOthersCount === 0 ? (
+            <div className="w-full max-w-xl rounded-lg border border-primary/25 bg-surface-blue px-4 py-3 text-sm text-text">
+              <p className="font-medium text-text mb-1">Find people to follow</p>
+              <p className="text-text-secondary mb-2">
+                You&apos;re not following anyone yet. Open{" "}
+                <Link href="/explore" className="text-primary font-medium hover:text-primary-hover hover:underline transition-colors">
+                  Explore
+                </Link>{" "}
+                to see public posts, then visit profiles and use <span className="font-medium">Follow</span> on people
+                you like.
+              </p>
+            </div>
+          ) : null}
           <Feed
             posts={posts}
             loading={postsLoading}
@@ -227,19 +223,21 @@ function ClientShell() {
             onRetry={loadPosts}
             onReblog={handleReblog}
             showReblog
+            supabase={supabase}
+            currentUserId={user?.id ?? null}
           />
           <PostForm supabase={supabase} onPosted={loadPosts} />
         </>
       ) : user ? (
-        <p className="text-zinc-500 text-sm">Loading profile…</p>
+        <p className="text-text-muted text-sm">Loading profile…</p>
       ) : (
         <div className="w-full max-w-xl flex flex-col items-center gap-4 text-center">
-          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+          <p className="text-text-secondary text-sm">
             Sign in to see posts from you and people you follow, and to post. Home is your personal feed only.
           </p>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+          <p className="text-text-muted text-sm">
             Browse everything that&apos;s public on{" "}
-            <Link href="/explore" className="text-blue-600 dark:text-blue-400 font-medium hover:underline">
+            <Link href="/explore" className="text-primary font-medium hover:text-primary-hover hover:underline transition-colors">
               Explore
             </Link>
             .
@@ -264,8 +262,8 @@ export default function HomeClient() {
         aria-busy="true"
         aria-label="Loading"
       >
-        <div className="h-36 rounded-lg bg-zinc-200/80 dark:bg-zinc-800/80 animate-pulse" />
-        <div className="h-28 rounded-lg bg-zinc-200/60 dark:bg-zinc-800/60 animate-pulse" />
+        <div className="h-36 rounded-lg bg-bg-secondary animate-pulse" />
+        <div className="h-28 rounded-lg bg-bg-secondary/80 animate-pulse" />
       </div>
     );
   }

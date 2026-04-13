@@ -6,6 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 import ProfileUsernameLink from "./ProfileUsernameLink";
+import ThemeAppearanceSettings from "./ThemeAppearanceSettings";
 
 export default function SettingsClient() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -44,7 +45,7 @@ export default function SettingsClient() {
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md p-6 bg-amber-50 dark:bg-amber-950/30 rounded-lg text-amber-900 dark:text-amber-100 text-sm">
+      <div className="w-full max-w-md p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
         <p className="font-medium">Supabase is not configured.</p>
       </div>
     );
@@ -52,13 +53,12 @@ export default function SettingsClient() {
 
   return (
     <div className="w-full max-w-md flex flex-col gap-6">
-      <section className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-sm">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400 mb-3">
-          Account
-        </h2>
+      <ThemeAppearanceSettings />
+      <section className="rounded-lg border border-border bg-surface p-5 shadow-sm">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted mb-3">Account</h2>
         {user ? (
           <div className="flex flex-col gap-4">
-            <p className="text-sm text-zinc-700 dark:text-zinc-300">
+            <p className="text-sm text-text-secondary">
               {username ? (
                 <>
                   Signed in as{" "}
@@ -73,7 +73,7 @@ export default function SettingsClient() {
             {username ? (
               <Link
                 href={`/profile/${encodeURIComponent(normalizeUsername(username))}`}
-                className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline w-fit"
+                className="text-sm font-medium text-primary hover:text-primary-hover hover:underline w-fit transition-colors"
               >
                 Open your profile
               </Link>
@@ -87,15 +87,18 @@ export default function SettingsClient() {
                 setLoading(false);
                 void refresh();
               }}
-              className="w-fit py-2 px-4 rounded-md bg-zinc-800 dark:bg-zinc-200 text-white dark:text-zinc-900 text-sm font-semibold hover:opacity-90 disabled:opacity-50"
+              className="w-fit py-2 px-4 rounded-md bg-text text-bg text-sm font-semibold hover:opacity-90 active:opacity-80 disabled:opacity-50 transition-opacity"
             >
               {loading ? "Signing out…" : "Sign out"}
             </button>
           </div>
         ) : (
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="text-sm text-text-secondary">
             You&apos;re not signed in.{" "}
-            <Link href="/" className="text-blue-600 dark:text-blue-400 font-medium hover:underline">
+            <Link
+              href="/"
+              className="text-primary font-medium hover:text-primary-hover hover:underline transition-colors"
+            >
               Go to Home
             </Link>{" "}
             to sign in.

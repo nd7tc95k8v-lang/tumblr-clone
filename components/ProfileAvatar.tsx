@@ -44,14 +44,14 @@ export default function ProfileAvatar({ url, label, size = "md", className = "" 
         alt={alt}
         loading="lazy"
         decoding="async"
-        className={`${frame} rounded-full object-cover shrink-0 bg-zinc-200 dark:bg-zinc-700 ring-1 ring-zinc-200/80 dark:ring-zinc-600/80 ${className}`}
+        className={`${frame} rounded-full object-cover shrink-0 bg-bg-secondary ring-1 ring-border ${className}`}
       />
     );
   }
 
   return (
     <div
-      className={`${frame} ${fallbackTextClass[size]} rounded-full shrink-0 flex items-center justify-center font-semibold bg-zinc-300 text-zinc-700 dark:bg-zinc-600 dark:text-zinc-200 ring-1 ring-zinc-200/80 dark:ring-zinc-600/80 ${className}`}
+      className={`${frame} ${fallbackTextClass[size]} rounded-full shrink-0 flex items-center justify-center font-semibold bg-bg-secondary text-text-secondary ring-1 ring-border ${className}`}
       aria-hidden
     >
       {initialsFromLabel(label)}

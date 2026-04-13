@@ -40,17 +40,17 @@ export default async function ProfilePage({ params }: PageProps) {
 
   if (!supabase) {
     return (
-      <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4 py-16">
-        <p className="text-zinc-700 dark:text-zinc-300 text-sm">Supabase is not configured.</p>
+      <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
+        <p className="text-text-secondary text-sm">Supabase is not configured.</p>
       </main>
     );
   }
 
   if (!normalized) {
     return (
-      <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4 py-16">
-        <p className="text-zinc-700 dark:text-zinc-300 text-sm mb-4">Invalid username.</p>
-        <Link href="/" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+      <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
+        <p className="text-text-secondary text-sm mb-4">Invalid username.</p>
+        <Link href="/" className="text-sm text-primary hover:text-primary-hover hover:underline transition-colors">
           Back to home
         </Link>
       </main>
@@ -65,9 +65,9 @@ export default async function ProfilePage({ params }: PageProps) {
 
   if (profileError) {
     return (
-      <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4 py-16">
-        <p className="text-red-700 dark:text-red-300 text-sm">{profileError.message}</p>
-        <Link href="/" className="mt-4 text-sm text-blue-600 dark:text-blue-400 hover:underline">
+      <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
+        <p className="text-error text-sm">{profileError.message}</p>
+        <Link href="/" className="mt-4 text-sm text-primary hover:text-primary-hover hover:underline transition-colors">
           Back to home
         </Link>
       </main>
@@ -76,10 +76,10 @@ export default async function ProfilePage({ params }: PageProps) {
 
   if (!profileRow?.username) {
     return (
-      <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4 py-16">
-        <p className="text-zinc-700 dark:text-zinc-300 text-sm mb-1">No user named @{normalized}.</p>
-        <p className="text-zinc-500 dark:text-zinc-400 text-xs mb-6">That profile does not exist.</p>
-        <Link href="/" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+      <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
+        <p className="text-text-secondary text-sm mb-1">No user named @{normalized}.</p>
+        <p className="text-text-muted text-xs mb-6">That profile does not exist.</p>
+        <Link href="/" className="text-sm text-primary hover:text-primary-hover hover:underline transition-colors">
           Back to home
         </Link>
       </main>

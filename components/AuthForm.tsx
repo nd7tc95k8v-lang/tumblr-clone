@@ -29,10 +29,13 @@ export default function AuthForm({
 
   if (user) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 bg-zinc-100 dark:bg-zinc-900 rounded-lg shadow-md flex flex-col gap-3">
-        <p className="text-zinc-800 dark:text-zinc-100 text-sm">
+      <div className="w-full max-w-md mx-auto p-6 bg-bg-secondary rounded-lg shadow-md border border-border flex flex-col gap-3">
+        <p className="text-text text-sm">
           {needsProfileSetup ? (
-            <>Signed in. <span className="font-medium">Choose a username below</span> to finish.</>
+            <>
+              Welcome! <span className="font-medium">Choose a username below</span> to finish signup — you can add a
+              photo and bio there too, or skip for now.
+            </>
           ) : publicUsername ? (
             <>
               Signed in as{" "}
@@ -53,7 +56,7 @@ export default function AuthForm({
             onAuthChange();
           }}
           disabled={loading}
-          className="py-2 px-4 bg-zinc-700 text-white font-semibold rounded hover:bg-zinc-800 disabled:opacity-50"
+          className="py-2 px-4 bg-text text-bg font-semibold rounded hover:opacity-90 active:opacity-80 disabled:opacity-50 transition-opacity"
         >
           Sign out
         </button>
@@ -69,7 +72,9 @@ export default function AuthForm({
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        setMessage("Check your email to confirm, or sign in if confirmations are disabled.");
+        setMessage(
+          "Check your email to confirm, or sign in if confirmations are disabled. After you sign in, you'll choose a username.",
+        );
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -85,9 +90,9 @@ export default function AuthForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4 w-full max-w-md mx-auto p-6 bg-zinc-100 dark:bg-zinc-900 rounded-lg shadow-md"
+      className="flex flex-col gap-4 w-full max-w-md mx-auto p-6 bg-bg-secondary rounded-lg shadow-md border border-border"
     >
-      <h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-100">
+      <h2 className="text-lg font-semibold text-text">
         {mode === "signin" ? "Sign in" : "Create account"}
       </h2>
       <input
@@ -97,7 +102,7 @@ export default function AuthForm({
         placeholder="Email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="w-full p-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        className="w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus"
       />
       <input
         type="password"
@@ -106,15 +111,15 @@ export default function AuthForm({
         placeholder="Password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="w-full p-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        className="w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus"
       />
       {message && (
-        <p className="text-sm text-amber-700 dark:text-amber-300">{message}</p>
+        <p className="text-sm text-warning">{message}</p>
       )}
       <button
         type="submit"
         disabled={loading}
-        className="py-2 px-4 bg-blue-600 text-white font-semibold rounded hover:bg-blue-700 disabled:opacity-50"
+        className="py-2 px-4 bg-primary text-white font-semibold rounded hover:bg-primary-hover active:bg-primary-pressed disabled:opacity-50 transition-colors"
       >
         {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
       </button>
@@ -124,7 +129,7 @@ export default function AuthForm({
           setMode(mode === "signin" ? "signup" : "signin");
           setMessage(null);
         }}
-        className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+        className="text-sm text-primary hover:text-primary-hover hover:underline transition-colors"
       >
         {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
       </button>
