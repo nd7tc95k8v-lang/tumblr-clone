@@ -2,14 +2,25 @@
 
 import React, { useState } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import ProfileUsernameLink from "./ProfileUsernameLink";
 
 type Props = {
   supabase: SupabaseClient;
   user: User | null;
   onAuthChange: () => void;
+  /** Public @handle when onboarding is complete (email is never shown). */
+  publicUsername?: string | null;
+  /** When true, prompt to finish username setup instead of showing a handle. */
+  needsProfileSetup?: boolean;
 };
 
-export default function AuthForm({ supabase, user, onAuthChange }: Props) {
+export default function AuthForm({
+  supabase,
+  user,
+  onAuthChange,
+  publicUsername = null,
+  needsProfileSetup = false,
+}: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -20,7 +31,18 @@ export default function AuthForm({ supabase, user, onAuthChange }: Props) {
     return (
       <div className="w-full max-w-md mx-auto p-6 bg-zinc-100 dark:bg-zinc-900 rounded-lg shadow-md flex flex-col gap-3">
         <p className="text-zinc-800 dark:text-zinc-100 text-sm">
-          Signed in as <span className="font-medium">{user.email}</span>
+          {needsProfileSetup ? (
+            <>Signed in. <span className="font-medium">Choose a username below</span> to finish.</>
+          ) : publicUsername ? (
+            <>
+              Signed in as{" "}
+              <ProfileUsernameLink usernameRaw={publicUsername} className="font-medium text-inherit">
+                @{publicUsername}
+              </ProfileUsernameLink>
+            </>
+          ) : (
+            <>Signed in.</>
+          )}
         </p>
         <button
           type="button"

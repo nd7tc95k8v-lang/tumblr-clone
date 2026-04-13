@@ -1,27 +1,20 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import type { FeedPost } from "@/types/post";
+import PostCard from "./PostCard";
 
 type Props = {
   posts: FeedPost[];
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  onReblog: (post: FeedPost) => void | Promise<void>;
+  showReblog?: boolean;
 };
 
-function formatTime(iso: string) {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-const Feed: React.FC<Props> = ({ posts, loading, error, onRetry }) => {
+const Feed: React.FC<Props> = ({ posts, loading, error, onRetry, onReblog, showReblog = true }) => {
+  const [rebloggingId, setRebloggingId] = useState<string | null>(null);
   if (loading && posts.length === 0) {
     return <p className="text-zinc-500 text-sm w-full max-w-xl mx-auto">Loading posts…</p>;
   }
@@ -52,15 +45,20 @@ const Feed: React.FC<Props> = ({ posts, loading, error, onRetry }) => {
   return (
     <div className="flex flex-col gap-4 w-full max-w-xl mx-auto">
       {posts.map((post) => (
-        <article
+        <PostCard
           key={post.id}
-          className="bg-white dark:bg-zinc-800 rounded-lg shadow p-4"
-        >
-          <p className="text-zinc-900 dark:text-zinc-100 mb-2 whitespace-pre-wrap">
-            {post.content}
-          </p>
-          <p className="text-xs text-zinc-400 dark:text-zinc-500">{formatTime(post.created_at)}</p>
-        </article>
+          post={post}
+          rebloggingId={rebloggingId}
+          showReblog={showReblog}
+          onReblog={async (p) => {
+            setRebloggingId(p.id);
+            try {
+              await onReblog(p);
+            } finally {
+              setRebloggingId(null);
+            }
+          }}
+        />
       ))}
     </div>
   );

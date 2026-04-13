@@ -3,10 +3,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { POST_FEED_SELECT } from "@/lib/supabase/post-feed-select";
+import { profileNeedsOnboarding } from "@/lib/username";
 import type { FeedPost } from "@/types/post";
 import AuthForm from "./AuthForm";
 import Feed from "./Feed";
 import PostForm from "./PostForm";
+import UsernameOnboarding from "./UsernameOnboarding";
+
+type ProfileRow = { id: string; username: string | null };
 
 function ClientShell() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -15,6 +20,9 @@ function ClientShell() {
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
+  const [profile, setProfile] = useState<ProfileRow | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileLoadFailed, setProfileLoadFailed] = useState(false);
 
   const refreshSession = useCallback(async () => {
     if (!supabase) {
@@ -26,21 +34,100 @@ function ClientShell() {
     setSessionReady(true);
   }, [supabase]);
 
+  const loadProfile = useCallback(async () => {
+    if (!supabase || !user) {
+      setProfile(null);
+      setProfileLoadFailed(false);
+      return;
+    }
+    setProfileLoading(true);
+    setProfileLoadFailed(false);
+    try {
+      let { data, error } = await supabase
+        .from("profiles")
+        .select("id, username")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (error) {
+        console.error(error);
+        setProfile(null);
+        setProfileLoadFailed(true);
+        return;
+      }
+      if (!data) {
+        const { error: insertError } = await supabase.from("profiles").insert({ id: user.id });
+        if (insertError) {
+          console.error(insertError);
+          setProfile(null);
+          setProfileLoadFailed(true);
+          return;
+        }
+        data = { id: user.id, username: null };
+      }
+      setProfile(data);
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [supabase, user]);
+
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
     setPostsLoading(true);
     setPostsError(null);
-    const { data, error } = await supabase
-      .from("posts")
-      .select("id, content, created_at, user_id")
-      .order("created_at", { ascending: false });
-    setPostsLoading(false);
-    if (error) {
-      setPostsError(error.message);
-      return;
+    try {
+      let query = supabase.from("posts").select(POST_FEED_SELECT).order("created_at", { ascending: false });
+
+      if (user) {
+        const { data: followRows, error: followError } = await supabase
+          .from("follows")
+          .select("following_id")
+          .eq("follower_id", user.id);
+        if (followError) {
+          setPostsError(followError.message);
+          return;
+        }
+        const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
+        const authorIds = Array.from(new Set<string>([user.id, ...followedIds]));
+        query = query.in("user_id", authorIds);
+      }
+
+      const { data, error } = await query;
+      if (error) {
+        setPostsError(error.message);
+        return;
+      }
+      setPosts((data as FeedPost[]) ?? []);
+    } finally {
+      setPostsLoading(false);
     }
-    setPosts((data as FeedPost[]) ?? []);
-  }, [supabase]);
+  }, [supabase, user]);
+
+  const handleReblog = useCallback(
+    async (original: FeedPost) => {
+      if (!supabase) return;
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+      if (userError || !user) {
+        alert("You must be logged in to reblog.");
+        return;
+      }
+      const { error } = await supabase.from("posts").insert({
+        user_id: user.id,
+        content: original.content,
+        image_url: original.image_url ?? null,
+        reblog_of: original.id,
+      });
+      if (error) {
+        console.error(error);
+        alert("Reblog failed.");
+        return;
+      }
+      await loadPosts();
+    },
+    [supabase, loadPosts],
+  );
 
   useEffect(() => {
     if (!supabase) return;
@@ -54,12 +141,28 @@ function ClientShell() {
   }, [supabase, refreshSession]);
 
   useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
+
+  const needsOnboarding = Boolean(user && profile && profileNeedsOnboarding(profile.username));
+  const showFeed = Boolean(user && profile && !profileNeedsOnboarding(profile.username));
+
+  useEffect(() => {
+    if (!supabase || !sessionReady) return;
     if (!user) {
+      void loadPosts();
+      return;
+    }
+    if (needsOnboarding) {
+      setPosts([]);
+      return;
+    }
+    if (!showFeed) {
       setPosts([]);
       return;
     }
     void loadPosts();
-  }, [user, loadPosts]);
+  }, [supabase, sessionReady, user, needsOnboarding, showFeed, loadPosts]);
 
   if (!supabase) {
     return (
@@ -91,18 +194,59 @@ function ClientShell() {
 
   return (
     <>
-      <AuthForm supabase={supabase} user={user} onAuthChange={refreshSession} />
+      <AuthForm
+        supabase={supabase}
+        user={user}
+        onAuthChange={refreshSession}
+        publicUsername={profile?.username?.trim() || null}
+        needsProfileSetup={Boolean(user && profile && profileNeedsOnboarding(profile.username))}
+      />
       {!sessionReady ? (
         <p className="text-zinc-500 text-sm">Loading…</p>
-      ) : user ? (
-        <>
-          <Feed posts={posts} loading={postsLoading} error={postsError} onRetry={loadPosts} />
-          <PostForm supabase={supabase} userId={user.id} onPosted={loadPosts} />
-        </>
-      ) : (
-        <p className="text-zinc-600 dark:text-zinc-400 text-sm text-center max-w-md">
-          Sign in to post and see the feed.
+      ) : user && profileLoading ? (
+        <p className="text-zinc-500 text-sm">Loading profile…</p>
+      ) : user && profileLoadFailed ? (
+        <p className="text-red-700 dark:text-red-300 text-sm max-w-md mx-auto">
+          Could not load your profile. Check the database migration for <code className="text-xs">profiles</code>{" "}
+          or try signing out and back in.
         </p>
+      ) : user && needsOnboarding && profile ? (
+        <UsernameOnboarding
+          supabase={supabase}
+          userId={user.id}
+          onComplete={loadProfile}
+        />
+      ) : user && showFeed ? (
+        <>
+          <p className="text-zinc-600 dark:text-zinc-400 text-sm text-center max-w-xl w-full">
+            Posts from you and people you follow.
+          </p>
+          <Feed
+            posts={posts}
+            loading={postsLoading}
+            error={postsError}
+            onRetry={loadPosts}
+            onReblog={handleReblog}
+            showReblog
+          />
+          <PostForm supabase={supabase} onPosted={loadPosts} />
+        </>
+      ) : user ? (
+        <p className="text-zinc-500 text-sm">Loading profile…</p>
+      ) : (
+        <div className="w-full max-w-xl flex flex-col items-center gap-4">
+          <p className="text-zinc-600 dark:text-zinc-400 text-sm text-center">
+            You&apos;re viewing the public feed. Sign in to see posts from you and people you follow, and to post.
+          </p>
+          <Feed
+            posts={posts}
+            loading={postsLoading}
+            error={postsError}
+            onRetry={loadPosts}
+            onReblog={handleReblog}
+            showReblog={false}
+          />
+        </div>
       )}
     </>
   );

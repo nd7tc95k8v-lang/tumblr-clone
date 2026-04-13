@@ -1,35 +1,83 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 type Props = {
   supabase: SupabaseClient;
-  userId: string;
   onPosted: () => void | Promise<void>;
 };
 
-const PostForm = ({ supabase, userId, onPosted }: Props) => {
+const PostForm = ({ supabase, onPosted }: Props) => {
   const [content, setContent] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    const trimmed = content.trim();
-    const { error: insertError } = await supabase.from("posts").insert({
-      content: trimmed,
-      user_id: userId,
-    });
-    setSubmitting(false);
-    if (insertError) {
-      setError(insertError.message);
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      alert("You must be logged in to post.");
       return;
     }
-    setContent("");
-    await onPosted();
+
+    setSubmitting(true);
+    try {
+      let imageUrl: string | null = null;
+
+      if (selectedFile) {
+        const rawExt = selectedFile.name.split(".").pop();
+        const fileExt =
+          rawExt && /^[a-z0-9]+$/i.test(rawExt) && rawExt.length <= 8
+            ? rawExt.toLowerCase()
+            : "jpg";
+        const filePath = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from("post-images")
+          .upload(filePath, selectedFile, {
+            contentType: selectedFile.type || `image/${fileExt}`,
+            upsert: false,
+          });
+
+        if (uploadError) {
+          console.error(uploadError);
+          alert("Image upload failed.");
+          return;
+        }
+
+        const { data: publicUrlData } = supabase.storage
+          .from("post-images")
+          .getPublicUrl(filePath);
+
+        imageUrl = publicUrlData.publicUrl;
+      }
+
+      const { error: insertError } = await supabase.from("posts").insert({
+        user_id: user.id,
+        content,
+        image_url: imageUrl,
+      });
+
+      if (insertError) {
+        console.error(insertError);
+        alert("Post failed.");
+        return;
+      }
+
+      setContent("");
+      setSelectedFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await onPosted();
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -48,7 +96,23 @@ const PostForm = ({ supabase, userId, onPosted }: Props) => {
         placeholder="What's on your mind?"
         required
       />
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      <div className="flex flex-col gap-1">
+        <label
+          htmlFor="post-image"
+          className="text-sm font-medium text-zinc-700 dark:text-zinc-300"
+        >
+          Image (optional)
+        </label>
+        <input
+          ref={fileInputRef}
+          id="post-image"
+          type="file"
+          accept="image/*"
+          disabled={submitting}
+          onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+          className="text-sm text-zinc-700 dark:text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-200 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-800 hover:file:bg-zinc-300 dark:file:bg-zinc-700 dark:file:text-zinc-100 dark:hover:file:bg-zinc-600"
+        />
+      </div>
       <button
         type="submit"
         disabled={submitting}
