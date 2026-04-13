@@ -1,4 +1,4 @@
-const LAST_USER_TEXT_KEY = "tumblr_clone_guard_last_text";
+const LAST_USER_TEXT_KEY = "qrtz_app_guard_last_text";
 const DUPLICATE_WINDOW_MS = 60_000;
 export const MAX_URLS_PER_USER_TEXT = 3;
 

@@ -11,12 +11,11 @@ export default function ComposeClient() {
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
-        <p className="font-medium mb-2">Supabase is not configured</p>
-        <p className="text-xs">
-          Add{" "}
-          <code className="rounded bg-bg-secondary border border-border px-1">NEXT_PUBLIC_SUPABASE_URL</code> and a
-          publishable key to <code className="rounded bg-bg-secondary border border-border px-1">.env.local</code>.
+      <div className="mx-auto w-full max-w-md rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
+        <p className="mb-2 font-medium">Supabase is not configured</p>
+        <p className="text-meta">
+          Add <code className="qrtz-code-inline">NEXT_PUBLIC_SUPABASE_URL</code> and a publishable key to{" "}
+          <code className="qrtz-code-inline">.env.local</code>.
         </p>
       </div>
     );

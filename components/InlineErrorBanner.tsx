@@ -12,13 +12,13 @@ export function InlineErrorBanner({ message, onDismiss, className = "" }: Props)
   return (
     <div
       role="alert"
-      className={`flex items-start justify-between gap-2 rounded-md border border-error/35 bg-error/10 px-3 py-2 text-sm text-text ${className}`}
+      className={`flex items-start justify-between gap-2 rounded-card border border-error/35 bg-error/10 px-3 py-2 text-sm text-text ${className}`}
     >
       <p className="min-w-0 flex-1 leading-snug text-error">{message}</p>
       <button
         type="button"
         onClick={onDismiss}
-        className="shrink-0 rounded px-1.5 py-0.5 text-xs font-medium text-error hover:bg-error/15"
+        className="shrink-0 rounded px-1.5 py-0.5 text-meta font-medium text-error transition-colors hover:bg-error/15 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-error/50 focus-visible:ring-offset-1 focus-visible:ring-offset-bg"
         aria-label="Dismiss error"
       >
         Dismiss

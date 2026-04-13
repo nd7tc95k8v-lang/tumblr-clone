@@ -1,65 +1,138 @@
 @import "tailwindcss";
 
+/* -------------------------------------------------------------------------- */
+/* Brand primitives — static hex (reference for gradients + documentation)   */
+/* -------------------------------------------------------------------------- */
+:root {
+  --brand-deep-violet: #4c2cf5;
+  --brand-electric-purple: #8b4cff;
+  --brand-crystal-pink: #ff4fd8;
+  --brand-aqua-blue: #35d0ff;
+  --brand-teal-accent: #1fc8a9;
+  --brand-app-bg: #0f1023;
+  --brand-app-surface: #171936;
+  --brand-app-border: #2a2d55;
+  --brand-app-text: #ffffff;
+  --brand-app-text-muted: #8b8fb8;
+
+  --gradient-primary-btn: linear-gradient(
+    135deg,
+    var(--brand-electric-purple),
+    var(--brand-deep-violet)
+  );
+  --gradient-purple: linear-gradient(
+    135deg,
+    var(--brand-crystal-pink),
+    var(--brand-electric-purple),
+    var(--brand-aqua-blue)
+  );
+
+  /* Tab / selected washes (theme-agnostic tints) */
+  --qrtz-tab-selected-bg: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--brand-crystal-pink) 14%, transparent),
+    color-mix(in srgb, var(--brand-electric-purple) 14%, transparent),
+    color-mix(in srgb, var(--brand-aqua-blue) 14%, transparent)
+  );
+  --qrtz-tab-selected-ring: color-mix(in srgb, var(--brand-electric-purple) 45%, transparent);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Semantic tokens — switch with [data-theme] (no duplicate hex vs brand)      */
+/* -------------------------------------------------------------------------- */
 [data-theme="light"] {
   color-scheme: light;
-  --primary: #2563eb;
-  --primary-hover: #1d4ed8;
-  --primary-pressed: #1e40af;
-  --primary-soft: #dbeafe;
-  --bg: #f8fafc;
-  --bg-secondary: #f1f5f9;
+  --primary: var(--brand-deep-violet);
+  --primary-hover: #6548f7;
+  --primary-pressed: #3a26c4;
+  --primary-soft: color-mix(in srgb, var(--brand-deep-violet) 12%, transparent);
+  --bg: #f5f4fc;
+  --bg-secondary: #ebe9f7;
   --surface: #ffffff;
-  --surface-elevated: #ffffff;
+  --surface-elevated: #faf9ff;
   --input: #ffffff;
-  --surface-blue: #eff6ff;
-  --border: #e2e8f0;
-  --border-soft: #cbd5e1;
-  --border-focus: #2563eb;
-  --text: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --text-disabled: #94a3b8;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --error: #ef4444;
-  --info: #06b6d4;
-  --notification: #0ea5e9;
+  --surface-blue: color-mix(in srgb, var(--brand-aqua-blue) 12%, transparent);
+  --border: #dcdaf0;
+  --border-soft: #c9c5e8;
+  --border-focus: var(--brand-electric-purple);
+  --text: #0f1023;
+  --text-secondary: #3d4166;
+  --text-muted: #5c6088;
+  --text-disabled: #8b8fb8;
+  --link: var(--brand-aqua-blue);
+  --link-hover: var(--brand-crystal-pink);
+  --success: var(--brand-teal-accent);
+  --warning: #f0a832;
+  --error: #e94b6b;
+  --info: var(--brand-aqua-blue);
+  --notification: var(--brand-electric-purple);
+  --modal-scrim: color-mix(in srgb, var(--text) 32%, transparent);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --primary: #3b82f6;
-  --primary-hover: #60a5fa;
-  --primary-pressed: #2563eb;
-  --primary-soft: #1e3a8a;
-  --bg: #0b1220;
-  --bg-secondary: #111827;
-  --surface: #172033;
-  --surface-elevated: #1e293b;
-  --input: #0f172a;
-  --surface-blue: #14213d;
-  --border: #243041;
-  --border-soft: #334155;
-  --border-focus: #3b82f6;
-  --text: #f8fafc;
-  --text-secondary: #cbd5e1;
-  --text-muted: #94a3b8;
-  --text-disabled: #64748b;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --error: #f87171;
-  --info: #22d3ee;
-  --notification: #38bdf8;
+  --primary: var(--brand-deep-violet);
+  --primary-hover: #6548f7;
+  --primary-pressed: #3a26c4;
+  --primary-soft: color-mix(in srgb, var(--brand-electric-purple) 18%, transparent);
+  --bg: var(--brand-app-bg);
+  --bg-secondary: #14162e;
+  --surface: var(--brand-app-surface);
+  --surface-elevated: #1c1f42;
+  --input: #13152c;
+  --surface-blue: color-mix(in srgb, var(--brand-aqua-blue) 8%, transparent);
+  --border: var(--brand-app-border);
+  --border-soft: #353865;
+  --border-focus: var(--brand-electric-purple);
+  --text: var(--brand-app-text);
+  --text-secondary: #b4b8d9;
+  --text-muted: var(--brand-app-text-muted);
+  --text-disabled: #6b6f94;
+  --link: var(--brand-aqua-blue);
+  --link-hover: var(--brand-crystal-pink);
+  --success: var(--brand-teal-accent);
+  --warning: #f0a832;
+  --error: #ff6b86;
+  --info: var(--brand-aqua-blue);
+  --notification: var(--brand-electric-purple);
+  --modal-scrim: color-mix(in srgb, #000 58%, transparent);
 }
 
+/* -------------------------------------------------------------------------- */
+/* Tailwind theme — maps to CSS variables (Tailwind = primary API)           */
+/* -------------------------------------------------------------------------- */
 @theme inline {
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-poppins), var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
 
+  --text-meta: 0.8125rem;
+  --text-meta--line-height: 1.25rem;
+
+  --radius-card: 14px;
+  --radius-btn: 10px;
+
+  /* Static brand palette */
+  --color-deep-violet: var(--brand-deep-violet);
+  --color-electric-purple: var(--brand-electric-purple);
+  --color-crystal-pink: var(--brand-crystal-pink);
+  --color-aqua-blue: var(--brand-aqua-blue);
+  --color-teal-accent: var(--brand-teal-accent);
+
+  /* Theme-aware “app” aliases */
+  --color-app-bg: var(--bg);
+  --color-app-surface: var(--surface);
+  --color-app-border: var(--border);
+  --color-app-text: var(--text);
+  --color-app-text-muted: var(--text-muted);
+
+  /* Semantic (existing component usage) */
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-pressed: var(--primary-pressed);
   --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--text-secondary);
+  --color-accent: var(--brand-electric-purple);
   --color-bg: var(--bg);
   --color-bg-secondary: var(--bg-secondary);
   --color-surface: var(--surface);
@@ -73,6 +146,12 @@
   --color-text-secondary: var(--text-secondary);
   --color-text-muted: var(--text-muted);
   --color-text-disabled: var(--text-disabled);
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
+  --color-accent-pink: var(--brand-crystal-pink);
+  --color-accent-purple: var(--brand-electric-purple);
+  --color-accent-aqua: var(--brand-aqua-blue);
+  --color-accent-teal: var(--brand-teal-accent);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-error: var(--error);
@@ -80,8 +159,107 @@
   --color-notification: var(--notification);
 }
 
-body {
-  background-color: var(--bg);
-  color: var(--text);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+/* -------------------------------------------------------------------------- */
+/* Base typography — Inter body, Poppins headings                              */
+/* -------------------------------------------------------------------------- */
+@layer base {
+  body {
+    @apply bg-bg text-text font-sans text-base font-normal antialiased leading-relaxed;
+  }
+
+  h1 {
+    @apply font-heading text-4xl font-bold leading-tight tracking-tight;
+  }
+
+  h2 {
+    @apply font-heading text-2xl font-bold leading-snug tracking-tight sm:text-[1.75rem];
+  }
+
+  h3 {
+    @apply font-heading text-xl font-bold leading-snug tracking-tight;
+  }
+
+  a:focus-visible {
+    @apply rounded-sm outline-none ring-1 ring-border-focus/80 ring-offset-1 ring-offset-bg;
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared layout primitives (gradients + effects Tailwind doesn’t bundle)     */
+/* -------------------------------------------------------------------------- */
+@layer components {
+  .qrtz-card {
+    @apply rounded-card border border-border bg-surface p-4 shadow-sm;
+  }
+
+  .qrtz-modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+    background: var(--modal-scrim);
+  }
+
+  .qrtz-modal-panel {
+    @apply max-h-[90vh] w-full max-w-md overflow-y-auto rounded-card border border-border bg-surface-elevated p-5 shadow-xl;
+  }
+
+  .qrtz-field {
+    @apply w-full rounded border border-border bg-input px-3 py-2.5 text-text placeholder:text-text-muted;
+    @apply focus:outline-none focus:ring-1 focus:ring-border-focus/70;
+    @apply focus-visible:ring-1 focus-visible:ring-border-focus/70 focus-visible:ring-offset-0;
+  }
+
+  .qrtz-checkbox {
+    @apply mt-0.5 size-4 shrink-0 rounded border-border;
+    accent-color: var(--primary);
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus/50;
+  }
+
+  .qrtz-code-inline {
+    @apply rounded border border-border bg-bg-secondary px-1 py-0.5 font-mono text-meta text-text;
+  }
+
+  .qrtz-btn-primary {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-btn font-semibold text-white;
+    @apply transition-[filter,opacity] duration-150 ease-out;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg;
+    background: var(--gradient-primary-btn);
+  }
+
+  .qrtz-btn-primary:hover:not(:disabled) {
+    @apply brightness-110;
+  }
+
+  .qrtz-btn-primary:active:not(:disabled) {
+    @apply brightness-95;
+  }
+
+  .qrtz-btn-primary:disabled {
+    @apply cursor-not-allowed opacity-50;
+  }
+
+  .qrtz-btn-secondary {
+    @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-btn border border-border bg-surface-elevated font-semibold text-text;
+    @apply transition-colors duration-150 ease-out;
+    @apply hover:border-border-soft hover:bg-bg-secondary;
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .qrtz-text-gradient {
+    background: var(--gradient-purple);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .qrtz-tab-selected {
+    background-image: var(--qrtz-tab-selected-bg);
+    box-shadow: inset 0 0 0 1px var(--qrtz-tab-selected-ring);
+  }
+
+  .qrtz-option-selected {
+    border: 2px solid transparent;
+    background:
+      linear-gradient(var(--surface), var(--surface)) padding-box,
+      var(--gradient-purple) border-box;
+  }
 }

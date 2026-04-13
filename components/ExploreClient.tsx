@@ -100,13 +100,11 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
-        <p className="font-medium mb-2">Supabase is not configured</p>
+      <div className="mx-auto w-full max-w-md rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
+        <p className="mb-2 font-medium">Supabase is not configured</p>
         <p>
-          Add{" "}
-          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">NEXT_PUBLIC_SUPABASE_URL</code> and
-          a publishable key to{" "}
-          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">.env.local</code>.
+          Add <code className="qrtz-code-inline">NEXT_PUBLIC_SUPABASE_URL</code> and a publishable key to{" "}
+          <code className="qrtz-code-inline">.env.local</code>.
         </p>
       </div>
     );
@@ -128,8 +126,8 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
         currentUserId={user?.id ?? null}
       />
       {!user ? (
-        <p className="text-text-muted text-xs text-center">
-          <Link href="/" className="text-primary hover:text-primary-hover hover:underline transition-colors">
+        <p className="text-center text-meta text-text-muted">
+          <Link href="/" className="text-link hover:text-link-hover hover:underline transition-colors">
             Sign in
           </Link>{" "}
           to reblog.

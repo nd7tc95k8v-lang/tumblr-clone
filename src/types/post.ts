@@ -9,9 +9,12 @@ export type EmbeddedPostWithAuthor = {
   id: string;
   content: string;
   image_url?: string | null;
+  /** Path in `post-images` bucket; signed URLs at display time when set. */
+  image_storage_path?: string | null;
   user_id: string;
   tags?: string[] | null;
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
+  is_nsfw?: boolean;
 };
 
 /**
@@ -25,8 +28,11 @@ export type QuotedPostNode = {
   created_at: string;
   user_id: string;
   image_url?: string | null;
+  image_storage_path?: string | null;
   reblog_of?: string | null;
   reblog_commentary?: string | null;
+  /** Inherited from DB; used for future mature-content UI. */
+  is_nsfw?: boolean;
   tags: string[];
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
   quoted_post: QuotedPostNode | null;
@@ -38,11 +44,17 @@ export type FeedPost = {
   created_at: string;
   user_id: string;
   image_url?: string | null;
+  /** Set for new uploads; reblogs copy parent path. */
+  image_storage_path?: string | null;
   reblog_of?: string | null;
   /** Optional note from the reblogger; only set when `reblog_of` is non-null. */
   reblog_commentary?: string | null;
   /** Root post id for this chain (equals `id` for originals). */
   original_post_id: string;
+  /** Mature content flag; enforced and inherited in DB (immutable once true). */
+  is_nsfw: boolean;
+  /** Audit hint from DB: parent_chain | profile_default_posts_nsfw | author | none */
+  nsfw_source?: string | null;
   /** Total likes on the thread root (`original_post_id`), same value for every row in the thread. */
   like_count: number;
   /** Descendant reblogs for the chain root (`original_post_id`). */

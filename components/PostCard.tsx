@@ -14,11 +14,12 @@ import {
   plainReblogViaProfile,
   postCardHeaderProfile,
   QUOTE_NEST_MAX_INITIAL_DEPTH,
-  quoteLayerOuterImageUrl,
+  quoteLayerOuterMedia,
   resolvePlainReblogDisplay,
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileUsernameLink from "./ProfileUsernameLink";
+import PostMediaImage from "./PostMediaImage";
 import {
   normalizePostBodyForDedup,
   recordSuccessfulUserWrittenPost,
@@ -92,7 +93,7 @@ function QuoteBubbleIcon({ className }: { className?: string }) {
 }
 
 const REBLOG_ACTION_CLASS =
-  "inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium text-primary hover:text-primary-hover transition-colors disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-meta font-medium text-link transition-colors hover:text-link-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50";
 
 type Props = {
   post: FeedPost;
@@ -140,7 +141,7 @@ export default function PostCard({
   const fallbackBody = bodyFromPost(post);
   const tags = displayTagsForPost(post);
   const commentary = post.reblog_commentary?.trim() || null;
-  const quoteOuterImage = quoteLayerOuterImageUrl(post);
+  const quoteOuterMedia = quoteLayerOuterMedia(post);
   const showNestedQuote = Boolean(quoteLayer && post.quoted_post);
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
   const plainReblogBy = plainReblogAttributionProfile(post);
@@ -153,120 +154,119 @@ export default function PostCard({
   } as const;
 
   return (
-    <article className="bg-surface rounded-lg shadow-sm border border-border p-4">
+    <article className="qrtz-card">
       <div className="flex gap-3">
         <ProfileAvatar url={primaryAvatarUrl} label={primary} size="md" className="mt-0.5" />
         <div className="min-w-0 flex-1">
-          <p className="text-base font-semibold text-text">
+          <p className="font-heading text-base font-semibold leading-tight tracking-tight text-text">
             <ProfileUsernameLink usernameRaw={primaryRaw} className="font-semibold text-inherit">
               {primary}
             </ProfileUsernameLink>
           </p>
           {plainReblogBy ? (
-            <p className="mt-1 text-xs text-text-muted leading-snug">
+            <p className="mt-1 text-meta leading-snug text-text-muted">
               <span className="text-text-muted/90">Reblogged by </span>
               <ProfileUsernameLink
                 usernameRaw={plainReblogBy.primaryRaw}
-                className="font-medium text-text-muted hover:text-primary"
+                className="font-medium text-text-muted hover:text-link"
               >
                 @{plainReblogBy.primary}
               </ProfileUsernameLink>
             </p>
           ) : null}
           {plainReblogVia ? (
-            <p className="mt-0.5 text-xs text-text-muted/85 leading-snug">
+            <p className="mt-0.5 text-meta leading-snug text-text-muted/85">
               <span className="text-text-muted/75">via </span>
               <ProfileUsernameLink
                 usernameRaw={plainReblogVia.primaryRaw}
-                className="font-medium text-text-muted hover:text-primary"
+                className="font-medium text-text-muted hover:text-link"
               >
                 @{plainReblogVia.primary}
               </ProfileUsernameLink>
             </p>
           ) : null}
           {quoteLayer && commentary ? (
-            <p className="mt-2 text-sm text-text whitespace-pre-wrap leading-relaxed">{commentary}</p>
+            <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-text">{commentary}</p>
           ) : null}
-          {quoteOuterImage ? (
-            <img
-              src={quoteOuterImage}
+          {quoteOuterMedia ? (
+            <PostMediaImage
+              supabase={supabase}
+              storagePath={quoteOuterMedia.storagePath}
+              legacyUrl={quoteOuterMedia.legacyUrl}
               alt="Post image"
-              loading="lazy"
-              decoding="async"
-              className="mt-3 rounded-xl max-h-[500px] w-full object-cover"
+              className="mt-3 rounded-card max-h-[500px] w-full object-cover"
             />
           ) : null}
           {!isReblog ? (
             <>
-              <p className="text-text mt-3 mb-2 whitespace-pre-wrap">{post.content}</p>
-              {post.image_url?.trim() ? (
-                <img
-                  src={post.image_url.trim()}
-                  alt="Post image"
-                  loading="lazy"
-                  decoding="async"
-                  className="mt-3 rounded-xl max-h-[500px] w-full object-cover"
-                />
-              ) : null}
+              <p className="mb-2 mt-3 whitespace-pre-wrap text-base leading-relaxed text-text">{post.content}</p>
+              <PostMediaImage
+                supabase={supabase}
+                storagePath={post.image_storage_path}
+                legacyUrl={post.image_url}
+                alt="Post image"
+                className="mt-3 rounded-card max-h-[500px] w-full object-cover"
+              />
             </>
           ) : null}
           {plainResolved?.kind === "flat" ? (
             <>
               {plainResolved.leaf.content ? (
-                <p className="text-text mt-3 mb-2 whitespace-pre-wrap">{plainResolved.leaf.content}</p>
+                <p className="mb-2 mt-3 whitespace-pre-wrap text-base leading-relaxed text-text">{plainResolved.leaf.content}</p>
               ) : null}
-              {plainResolved.leaf.image_url?.trim() ? (
-                <img
-                  src={plainResolved.leaf.image_url.trim()}
-                  alt="Post image"
-                  loading="lazy"
-                  decoding="async"
-                  className="mt-3 rounded-xl max-h-[500px] w-full object-cover"
-                />
-              ) : null}
+              <PostMediaImage
+                supabase={supabase}
+                storagePath={plainResolved.leaf.image_storage_path}
+                legacyUrl={plainResolved.leaf.image_url}
+                alt="Post image"
+                className="mt-3 rounded-card max-h-[500px] w-full object-cover"
+              />
             </>
           ) : null}
           {plainResolved?.kind === "quoted" ? (
             <>
               {plainResolved.node.reblog_commentary?.trim() ? (
-                <p className="mt-2 text-sm text-text whitespace-pre-wrap leading-relaxed">
+                <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-text">
                   {plainResolved.node.reblog_commentary.trim()}
                 </p>
               ) : null}
               {plainResolved.node.quoted_post ? (
-                <QuotedPostNest node={plainResolved.node.quoted_post} depth={0} {...quoteNestExpandProps} />
+                <QuotedPostNest
+                  node={plainResolved.node.quoted_post}
+                  depth={0}
+                  supabase={supabase}
+                  {...quoteNestExpandProps}
+                />
               ) : (
-                <QuotedPostNest node={plainResolved.node} depth={0} {...quoteNestExpandProps} />
+                <QuotedPostNest node={plainResolved.node} depth={0} supabase={supabase} {...quoteNestExpandProps} />
               )}
             </>
           ) : null}
           {showFlatReblogFallback ? (
             <>
               {fallbackBody.content ? (
-                <p className="text-text mt-3 mb-2 whitespace-pre-wrap">{fallbackBody.content}</p>
+                <p className="mb-2 mt-3 whitespace-pre-wrap text-base leading-relaxed text-text">{fallbackBody.content}</p>
               ) : null}
-              {fallbackBody.imageSrc ? (
-                <img
-                  src={fallbackBody.imageSrc}
-                  alt="Post image"
-                  loading="lazy"
-                  decoding="async"
-                  className="mt-3 rounded-xl max-h-[500px] w-full object-cover"
-                />
-              ) : null}
-              <p className="mt-2 text-xs text-text-muted">Quote chain could not be fully loaded.</p>
+              <PostMediaImage
+                supabase={supabase}
+                storagePath={fallbackBody.image_storage_path}
+                legacyUrl={fallbackBody.imageSrc}
+                alt="Post image"
+                className="mt-3 rounded-card max-h-[500px] w-full object-cover"
+              />
+              <p className="mt-2 text-meta text-text-muted">Quote chain could not be fully loaded.</p>
             </>
           ) : null}
           {showNestedQuote && post.quoted_post ? (
-            <QuotedPostNest node={post.quoted_post} depth={0} {...quoteNestExpandProps} />
+            <QuotedPostNest node={post.quoted_post} depth={0} supabase={supabase} {...quoteNestExpandProps} />
           ) : null}
           {tags.length > 0 ? (
-            <ul className="mt-3 flex flex-wrap gap-2 list-none p-0">
+            <ul className="mt-3 flex list-none flex-wrap gap-2 p-0">
               {tags.map((t) => (
                 <li key={t}>
                   <Link
                     href={`/tag/${encodeURIComponent(t)}`}
-                    className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-bg-secondary text-text hover:bg-border-soft transition-colors"
+                    className="inline-block rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-meta font-medium text-link transition-colors hover:border-accent-purple/50 hover:text-link-hover focus-visible:ring-offset-0"
                   >
                     #{t}
                   </Link>
@@ -279,8 +279,8 @@ export default function PostCard({
             onDismiss={dismissLikeError}
             className="mt-3"
           />
-          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-x-3">
-              <p className="text-xs text-text-muted tabular-nums shrink-0">
+          <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-2 sm:gap-x-3">
+              <p className="shrink-0 tabular-nums text-meta text-text-muted">
                 {formatPostTime(post.created_at)}
               </p>
               <span className="hidden sm:inline text-border-soft select-none" aria-hidden>
@@ -291,8 +291,8 @@ export default function PostCard({
                   type="button"
                   disabled={!currentUserId || likeBusy}
                   onClick={() => void toggleLike()}
-                  className={`inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 text-xs font-medium tabular-nums transition-colors disabled:pointer-events-none disabled:opacity-50 ${
-                    liked ? "text-error" : "text-text-muted hover:text-text"
+                  className={`inline-flex items-center justify-center gap-1.5 rounded-md px-1.5 py-1 text-meta font-medium tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50 ${
+                    liked ? "text-accent-pink" : "text-text-muted hover:text-text"
                   } ${likeBusy ? "cursor-wait" : "cursor-pointer"}`}
                   aria-pressed={liked}
                   aria-busy={likeBusy}
@@ -305,7 +305,7 @@ export default function PostCard({
                   <span className="min-w-[1ch] text-left">{Math.max(0, likeCount)}</span>
                 </button>
                 <span
-                  className="inline-flex items-center justify-center gap-1.5 px-0.5 py-1 text-xs font-medium tabular-nums text-text-muted"
+                  className="inline-flex items-center justify-center gap-1.5 px-0.5 py-1 text-meta font-medium tabular-nums text-text-muted"
                   title="Reblogs on this thread"
                 >
                   <span className="inline-flex h-4 w-4 items-center justify-center text-text-muted" aria-hidden>

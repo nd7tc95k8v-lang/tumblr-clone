@@ -46,7 +46,7 @@ export default function ReblogModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+      className="qrtz-modal-overlay"
       onClick={() => !busy && onClose()}
       role="presentation"
     >
@@ -55,15 +55,18 @@ export default function ReblogModal({
         aria-modal="true"
         aria-labelledby="reblog-modal-title"
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md rounded-lg bg-surface-elevated shadow-xl border border-border p-6 max-h-[90vh] overflow-y-auto"
+        className="qrtz-modal-panel"
       >
-        <h2 id="reblog-modal-title" className="text-lg font-semibold text-text mb-2">
+        <h2 id="reblog-modal-title" className="mb-2 font-heading text-lg font-semibold text-text">
           Quote
         </h2>
-        <p className="text-xs text-text-muted mb-3 line-clamp-4 whitespace-pre-wrap">
+        <p className="mb-3 line-clamp-4 whitespace-pre-wrap text-meta text-text-muted">
           From <span className="font-medium text-text-secondary">{quotedAuthor}</span>: {preview}
         </p>
-        <label htmlFor="reblog-commentary" className="block text-sm font-medium text-text-secondary mb-1">
+        <p className="mb-2 text-meta text-text-muted">
+          If the post is mature (NSFW), your reblog stays mature too—the database enforces inheritance.
+        </p>
+        <label htmlFor="reblog-commentary" className="mb-1.5 block text-meta font-medium text-text-secondary">
           Commentary <span className="font-normal text-text-muted">(optional)</span>
         </label>
         <textarea
@@ -76,17 +79,17 @@ export default function ReblogModal({
           disabled={busy}
           rows={4}
           placeholder="Say something about this post…"
-          className="w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus resize-y min-h-[80px] mb-3"
+          className="qrtz-field mb-3 min-h-[80px] resize-y"
         />
         {errorMessage?.trim() && onDismissError ? (
           <InlineErrorBanner message={errorMessage} onDismiss={onDismissError} className="mb-3" />
         ) : null}
-        <div className="flex flex-wrap gap-2 justify-end">
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
           <button
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="py-2 px-4 rounded border border-border bg-surface text-text text-sm font-medium hover:bg-bg-secondary disabled:opacity-50 transition-colors"
+            className="qrtz-btn-secondary px-4 py-2 text-sm"
           >
             Cancel
           </button>
@@ -94,7 +97,7 @@ export default function ReblogModal({
             type="button"
             disabled={busy}
             onClick={() => void onConfirm(text)}
-            className="py-2 px-4 rounded bg-primary text-white text-sm font-semibold hover:bg-primary-hover active:bg-primary-pressed disabled:opacity-50 transition-colors"
+            className="qrtz-btn-primary px-4 py-2 text-sm"
           >
             {busy ? "Quoting…" : "Quote"}
           </button>

@@ -13,7 +13,9 @@ import PostForm from "./PostForm";
 import UsernameOnboarding from "./UsernameOnboarding";
 import { useReblogAction } from "./useReblogAction";
 
-type ProfileRow = { id: string; username: string | null };
+type ProfileRow = { id: string; username: string | null; default_posts_nsfw?: boolean };
+
+type HomeFeedTab = "following" | "explore";
 
 function ClientShell() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -27,6 +29,7 @@ function ClientShell() {
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   /** Count of accounts this user follows (excluding self). Used for empty-follow hint. */
   const [followingOthersCount, setFollowingOthersCount] = useState<number | null>(null);
+  const [homeFeedTab, setHomeFeedTab] = useState<HomeFeedTab>("following");
 
   const refreshSession = useCallback(async () => {
     if (!supabase) {
@@ -49,7 +52,7 @@ function ClientShell() {
     try {
       let { data, error } = await supabase
         .from("profiles")
-        .select("id, username")
+        .select("id, username, default_posts_nsfw")
         .eq("id", user.id)
         .maybeSingle();
       if (error) {
@@ -66,7 +69,7 @@ function ClientShell() {
           setProfileLoadFailed(true);
           return;
         }
-        data = { id: user.id, username: null };
+        data = { id: user.id, username: null, default_posts_nsfw: false };
       }
       setProfile(data);
     } finally {
@@ -80,7 +83,7 @@ function ClientShell() {
     setPostsError(null);
     try {
       let filterUserIds: string[] | undefined;
-      if (user) {
+      if (user && homeFeedTab === "following") {
         const { data: followRows, error: followError } = await supabase
           .from("follows")
           .select("following_id")
@@ -94,11 +97,11 @@ function ClientShell() {
         setFollowingOthersCount(followedIds.length);
         filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
       } else {
-        setFollowingOthersCount(null);
+        if (!user) setFollowingOthersCount(null);
       }
 
       const { data, error } = await fetchFeedPosts(supabase, {
-        filterUserIds,
+        filterUserIds: user && homeFeedTab === "following" ? filterUserIds : undefined,
         viewerUserId: user?.id ?? null,
       });
       if (error) {
@@ -109,7 +112,7 @@ function ClientShell() {
     } finally {
       setPostsLoading(false);
     }
-  }, [supabase, user]);
+  }, [supabase, user, homeFeedTab]);
 
   const handleReblog = useReblogAction(supabase, { onSuccess: loadPosts });
 
@@ -153,22 +156,15 @@ function ClientShell() {
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
-        <p className="font-medium mb-2">Supabase is not configured</p>
+      <div className="mx-auto w-full max-w-md rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
+        <p className="mb-2 font-medium">Supabase is not configured</p>
         <p>
-          Add{" "}
-          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">NEXT_PUBLIC_SUPABASE_URL</code>{" "}
-          and{" "}
-          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">
-            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-          </code>{" "}
-          (or legacy{" "}
-          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
-          ) to <code className="text-xs bg-bg-secondary px-1 rounded border border-border">.env.local</code> in the{" "}
-          <span className="font-medium">tumblr-clone</span> folder, <span className="font-medium">save the file</span>,
-          then stop and run{" "}
-          <code className="text-xs bg-bg-secondary px-1 rounded border border-border">npm run dev</code> again so Next.js
-          picks up the variables.
+          Add <code className="qrtz-code-inline">NEXT_PUBLIC_SUPABASE_URL</code> and{" "}
+          <code className="qrtz-code-inline">NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code> (or legacy{" "}
+          <code className="qrtz-code-inline">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>) to{" "}
+          <code className="qrtz-code-inline">.env.local</code> in this app&apos;s project folder,{" "}
+          <span className="font-medium">save the file</span>, then stop and run{" "}
+          <code className="qrtz-code-inline">npm run dev</code> again so Next.js picks up the variables.
         </p>
       </div>
     );
@@ -188,9 +184,9 @@ function ClientShell() {
       ) : user && profileLoading ? (
         <p className="text-text-muted text-sm">Loading profile…</p>
       ) : user && profileLoadFailed ? (
-        <p className="text-error text-sm max-w-md mx-auto">
-          Could not load your profile. Check the database migration for <code className="text-xs">profiles</code>{" "}
-          or try signing out and back in.
+        <p className="mx-auto max-w-md text-sm text-error">
+          Could not load your profile. Check the database migration for{" "}
+          <code className="qrtz-code-inline">profiles</code> or try signing out and back in.
         </p>
       ) : user && needsOnboarding && profile ? (
         <UsernameOnboarding
@@ -200,19 +196,64 @@ function ClientShell() {
         />
       ) : user && showFeed ? (
         <>
-          <p className="text-text-secondary text-sm text-center max-w-xl w-full">
-            Posts from you and people you follow.
-          </p>
-          {followingOthersCount === 0 ? (
-            <div className="w-full max-w-xl rounded-lg border border-primary/25 bg-surface-blue px-4 py-3 text-sm text-text">
+          <div className="w-full max-w-xl flex flex-col items-stretch gap-3">
+            <div
+              className="flex rounded-card border border-border bg-bg-secondary p-0.5"
+              role="tablist"
+              aria-label="Home feed"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={homeFeedTab === "following"}
+                id="home-tab-following"
+                className={`flex-1 rounded-btn px-3 py-2 text-sm font-medium transition-colors ${
+                  homeFeedTab === "following"
+                    ? "qrtz-tab-selected text-text"
+                    : "text-text-muted hover:text-text"
+                }`}
+                onClick={() => setHomeFeedTab("following")}
+              >
+                Following
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={homeFeedTab === "explore"}
+                id="home-tab-explore"
+                className={`flex-1 rounded-btn px-3 py-2 text-sm font-medium transition-colors ${
+                  homeFeedTab === "explore"
+                    ? "qrtz-tab-selected text-text"
+                    : "text-text-muted hover:text-text"
+                }`}
+                onClick={() => setHomeFeedTab("explore")}
+              >
+                Explore
+              </button>
+            </div>
+            <p className="text-text-secondary text-sm text-center">
+              {homeFeedTab === "following"
+                ? "Posts from you and people you follow."
+                : "Public posts from everyone, newest first — same as the Explore page."}
+            </p>
+          </div>
+          {homeFeedTab === "following" && followingOthersCount === 0 ? (
+            <div className="w-full max-w-xl rounded-card border border-accent-aqua/35 bg-surface-blue px-4 py-3 text-sm text-text">
               <p className="font-medium text-text mb-1">Find people to follow</p>
               <p className="text-text-secondary mb-2">
-                You&apos;re not following anyone yet. Open{" "}
-                <Link href="/explore" className="text-primary font-medium hover:text-primary-hover hover:underline transition-colors">
+                You&apos;re not following anyone yet. Use the{" "}
+                <button
+                  type="button"
+                  onClick={() => setHomeFeedTab("explore")}
+                  className="text-link font-medium hover:text-link-hover hover:underline transition-colors"
+                >
+                  Explore
+                </button>{" "}
+                tab above (or the full{" "}
+                <Link href="/explore" className="text-link font-medium hover:text-link-hover hover:underline transition-colors">
                   Explore
                 </Link>{" "}
-                to see public posts, then visit profiles and use <span className="font-medium">Follow</span> on people
-                you like.
+                page), then follow people you like.
               </p>
             </div>
           ) : null}
@@ -226,7 +267,11 @@ function ClientShell() {
             supabase={supabase}
             currentUserId={user?.id ?? null}
           />
-          <PostForm supabase={supabase} onPosted={loadPosts} />
+          <PostForm
+            supabase={supabase}
+            onPosted={loadPosts}
+            defaultMarkNsfw={Boolean(profile?.default_posts_nsfw)}
+          />
         </>
       ) : user ? (
         <p className="text-text-muted text-sm">Loading profile…</p>
@@ -237,7 +282,7 @@ function ClientShell() {
           </p>
           <p className="text-text-muted text-sm">
             Browse everything that&apos;s public on{" "}
-            <Link href="/explore" className="text-primary font-medium hover:text-primary-hover hover:underline transition-colors">
+            <Link href="/explore" className="text-link font-medium hover:text-link-hover hover:underline transition-colors">
               Explore
             </Link>
             .
@@ -262,8 +307,8 @@ export default function HomeClient() {
         aria-busy="true"
         aria-label="Loading"
       >
-        <div className="h-36 rounded-lg bg-bg-secondary animate-pulse" />
-        <div className="h-28 rounded-lg bg-bg-secondary/80 animate-pulse" />
+        <div className="h-36 rounded-card bg-bg-secondary animate-pulse" />
+        <div className="h-28 rounded-card bg-bg-secondary/80 animate-pulse" />
       </div>
     );
   }

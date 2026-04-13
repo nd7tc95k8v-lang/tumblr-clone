@@ -33,12 +33,12 @@ const Feed: React.FC<Props> = ({
 
   if (error) {
     return (
-      <div className="w-full max-w-xl mx-auto p-4 rounded-lg border border-error/30 bg-error/10 text-text text-sm flex flex-col gap-2">
+      <div className="w-full max-w-xl mx-auto p-4 rounded-card border border-error/30 bg-error/10 text-text text-sm flex flex-col gap-2">
         <p>{error}</p>
         <button
           type="button"
           onClick={onRetry}
-          className="text-left underline font-medium text-primary hover:text-primary-hover"
+          className="text-left underline font-medium text-link hover:text-link-hover"
         >
           Try again
         </button>

@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { APP_NAME } from "@/lib/constants";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 
 type Props = {
@@ -29,12 +30,12 @@ export default function AuthForm({
 
   if (user) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 bg-bg-secondary rounded-lg shadow-md border border-border flex flex-col gap-3">
+      <div className="qrtz-card mx-auto flex w-full max-w-md flex-col gap-3">
         <p className="text-text text-sm">
           {needsProfileSetup ? (
             <>
-              Welcome! <span className="font-medium">Choose a username below</span> to finish signup — you can add a
-              photo and bio there too, or skip for now.
+              Welcome to {APP_NAME}! <span className="font-medium">Choose a username below</span> to finish signup — you
+              can add a photo and bio there too, or skip for now.
             </>
           ) : publicUsername ? (
             <>
@@ -56,7 +57,7 @@ export default function AuthForm({
             onAuthChange();
           }}
           disabled={loading}
-          className="py-2 px-4 bg-text text-bg font-semibold rounded hover:opacity-90 active:opacity-80 disabled:opacity-50 transition-opacity"
+          className="qrtz-btn-secondary px-4 py-2"
         >
           Sign out
         </button>
@@ -90,11 +91,16 @@ export default function AuthForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="flex flex-col gap-4 w-full max-w-md mx-auto p-6 bg-bg-secondary rounded-lg shadow-md border border-border"
+      className="qrtz-card mx-auto flex w-full max-w-md flex-col gap-4"
     >
-      <h2 className="text-lg font-semibold text-text">
-        {mode === "signin" ? "Sign in" : "Create account"}
+      <h2 className="font-heading text-lg font-semibold text-text">
+        {mode === "signin" ? `Welcome to ${APP_NAME}` : `Join ${APP_NAME}`}
       </h2>
+      <p className="text-sm text-text-secondary -mt-1">
+        {mode === "signin"
+          ? "Sign in with your email and password."
+          : "Create an account with your email and password."}
+      </p>
       <input
         type="email"
         required
@@ -102,7 +108,7 @@ export default function AuthForm({
         placeholder="Email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus"
+        className="qrtz-field"
       />
       <input
         type="password"
@@ -111,7 +117,7 @@ export default function AuthForm({
         placeholder="Password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        className="w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus"
+        className="qrtz-field"
       />
       {message && (
         <p className="text-sm text-warning">{message}</p>
@@ -119,7 +125,7 @@ export default function AuthForm({
       <button
         type="submit"
         disabled={loading}
-        className="py-2 px-4 bg-primary text-white font-semibold rounded hover:bg-primary-hover active:bg-primary-pressed disabled:opacity-50 transition-colors"
+        className="qrtz-btn-primary px-4 py-2"
       >
         {loading ? "…" : mode === "signin" ? "Sign in" : "Sign up"}
       </button>
@@ -129,7 +135,7 @@ export default function AuthForm({
           setMode(mode === "signin" ? "signup" : "signin");
           setMessage(null);
         }}
-        className="text-sm text-primary hover:text-primary-hover hover:underline transition-colors"
+        className="text-sm text-link hover:text-link-hover hover:underline transition-colors"
       >
         {mode === "signin" ? "Need an account? Sign up" : "Have an account? Sign in"}
       </button>

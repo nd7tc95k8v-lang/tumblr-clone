@@ -38,6 +38,8 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
   const [isFollowing, setIsFollowing] = useState<boolean | null>(null);
   const [followBusy, setFollowBusy] = useState(false);
   const [followStats, setFollowStats] = useState<ProfileFollowStats>(initialFollowStats);
+  /** When false, fetch only originals (`reblog_of` null); quote reblogs are hidden too. */
+  const [showReblogs, setShowReblogs] = useState(true);
 
   useEffect(() => {
     setLocalProfile(profile);
@@ -69,13 +71,14 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
     const { data, error } = await fetchFeedPosts(supabase, {
       filterUserIds: [localProfile.id],
       viewerUserId: user?.id ?? null,
+      excludeReblogs: !showReblogs,
     });
     if (error) {
       console.error(error);
       return;
     }
     setPosts(data ?? []);
-  }, [supabase, localProfile.id, user?.id]);
+  }, [supabase, localProfile.id, user?.id, showReblogs]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -187,7 +190,7 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
   return (
     <main className="min-h-screen bg-bg flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-xl flex flex-col gap-6">
-        <header className="bg-surface rounded-lg shadow-sm border border-border p-6">
+        <header className="qrtz-card md:p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <ProfileAvatar
               url={localProfile.avatar_url}
@@ -200,7 +203,7 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               className="shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <p className="text-2xl font-bold text-text">
+              <p className="font-heading text-2xl font-bold tracking-tight text-text">
                 <ProfileUsernameLink usernameRaw={localProfile.username} className="font-bold text-inherit">
                   @{localProfile.username}
                 </ProfileUsernameLink>
@@ -209,11 +212,11 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
                 <p className="text-lg text-text-secondary mt-1">{localProfile.display_name.trim()}</p>
               ) : null}
               {localProfile.bio?.trim() ? (
-                <p className="text-sm text-text-secondary mt-3 whitespace-pre-wrap">
+                <p className="mt-3 whitespace-pre-wrap text-base leading-relaxed text-text-secondary">
                   {localProfile.bio.trim()}
                 </p>
               ) : null}
-              <p className="text-sm text-text-muted mt-3">
+              <p className="mt-3 text-meta text-text-muted">
                 <span className="font-medium text-text-secondary">{followStats.followers}</span>{" "}
                 followers
                 <span className="mx-2 text-border-soft">·</span>
@@ -226,7 +229,7 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
                 <button
                   type="button"
                   onClick={() => setEditOpen(true)}
-                  className="py-1.5 px-3 text-sm font-medium rounded-md border border-border text-text hover:bg-bg-secondary transition-colors"
+                  className="qrtz-btn-secondary px-3 py-1.5 text-sm font-medium"
                 >
                   Edit profile
                 </button>
@@ -238,8 +241,8 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
                   disabled={followBusy || isFollowing === null}
                   className={
                     isFollowing
-                      ? "py-1.5 px-3 text-sm font-medium rounded-md border border-border text-text hover:bg-bg-secondary disabled:opacity-50 transition-colors"
-                      : "py-1.5 px-3 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary-hover disabled:opacity-50 transition-colors"
+                      ? "qrtz-btn-secondary px-3 py-1.5 text-sm font-medium disabled:opacity-50"
+                      : "qrtz-btn-primary px-3 py-1.5 text-sm font-medium"
                   }
                 >
                   {isFollowing === null
@@ -267,12 +270,20 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
         ) : null}
 
         <section className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-text-muted uppercase tracking-wide">
-            Posts
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-meta font-semibold uppercase tracking-wide text-text-muted">Posts</h2>
+            <button
+              type="button"
+              onClick={() => setShowReblogs((v) => !v)}
+              className="rounded-lg border border-border px-2.5 py-1.5 text-meta font-medium text-text-muted transition-colors hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/75 focus-visible:ring-offset-1 focus-visible:ring-offset-bg"
+              aria-pressed={showReblogs}
+            >
+              {showReblogs ? "Hide reblogs" : "Show reblogs"}
+            </button>
+          </div>
           {posts.length === 0 ? (
-            <p className="text-text-muted text-sm text-center py-8 bg-surface rounded-lg shadow-sm border border-border">
-              No posts yet.
+            <p className="qrtz-card py-8 text-center text-sm text-text-muted">
+              {showReblogs ? "No posts yet." : "No original posts yet. Show reblogs to see reposts and quotes."}
             </p>
           ) : (
             <div className="flex flex-col gap-4">

@@ -16,9 +16,12 @@ export const POST_FEED_BASE_SELECT = `
   created_at,
   user_id,
   image_url,
+  image_storage_path,
   reblog_of,
   reblog_commentary,
   original_post_id,
+  is_nsfw,
+  nsfw_source,
   tags,
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
@@ -28,7 +31,9 @@ export const POST_ORIGINAL_SELECT = `
   id,
   content,
   image_url,
+  image_storage_path,
   user_id,
+  is_nsfw,
   tags,
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
@@ -39,16 +44,22 @@ type FeedRow = Omit<
 >;
 
 /** Raw row from PostgREST (`original_post_id` may be null on legacy rows). */
-type FeedQueryRow = Omit<FeedRow, "original_post_id"> & { original_post_id?: string | null };
+type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw"> & {
+  original_post_id?: string | null;
+  is_nsfw?: boolean | null;
+  nsfw_source?: string | null;
+};
 
 function feedRowToEmbeddedOriginal(row: FeedRow): EmbeddedPostWithAuthor {
   return {
     id: row.id,
     content: row.content,
     image_url: row.image_url,
+    image_storage_path: row.image_storage_path,
     user_id: row.user_id,
     tags: coercePostTags(row.tags),
     author: row.author,
+    is_nsfw: row.is_nsfw,
   };
 }
 
@@ -59,9 +70,11 @@ function feedRowToChainRow(r: FeedRow): ChainPostRow {
     created_at: r.created_at,
     user_id: r.user_id,
     image_url: r.image_url,
+    image_storage_path: r.image_storage_path,
     reblog_of: r.reblog_of,
     reblog_commentary: r.reblog_commentary,
     original_post_id: r.original_post_id,
+    is_nsfw: r.is_nsfw,
     tags: coercePostTags(r.tags),
     author: r.author,
   };
@@ -72,19 +85,28 @@ function chainRowToEmbedded(row: ChainPostRow): EmbeddedPostWithAuthor {
     id: row.id,
     content: row.content,
     image_url: row.image_url,
+    image_storage_path: row.image_storage_path,
     user_id: row.user_id,
     tags: row.tags,
     author: row.author,
+    is_nsfw: row.is_nsfw,
   };
 }
 
 export type FetchFeedPostsOptions = {
-  /** If set, only posts whose user_id is in this list. */
+  /**
+   * **Following-style feed:** restrict to posts whose `user_id` is in this list (e.g. viewer + accounts they follow).
+   * **Explore-style feed:** omit this field — all posts, newest first (existing chronological order).
+   */
   filterUserIds?: string[];
   /** If set, only posts whose `tags` array contains this normalized tag. */
   filterTag?: string;
   /** When set, populates `liked_by_me` for those posts (requires the user’s JWT on `supabase`). */
   viewerUserId?: string | null;
+  /**
+   * Profile “hide reblogs”: keep only original rows (`reblog_of` IS NULL). Quote reblogs are still reblogs and are excluded.
+   */
+  excludeReblogs?: boolean;
 };
 
 /**
@@ -99,6 +121,10 @@ export async function fetchFeedPosts(
 
   if (options.filterUserIds && options.filterUserIds.length > 0) {
     query = query.in("user_id", options.filterUserIds);
+  }
+
+  if (options.excludeReblogs) {
+    query = query.is("reblog_of", null);
   }
 
   const tagFilter = options.filterTag?.trim();
@@ -117,6 +143,7 @@ export async function fetchFeedPosts(
   const feedRows: FeedRow[] = (rows as FeedQueryRow[]).map((r) => ({
     ...r,
     original_post_id: threadRootPostId(r),
+    is_nsfw: Boolean(r.is_nsfw),
   }));
   const feedById = new Map<string, FeedRow>(feedRows.map((r) => [r.id, r]));
 
@@ -172,6 +199,7 @@ export async function fetchFeedPosts(
 
   const merged: FeedPost[] = feedRows.map((row) => ({
     ...row,
+    is_nsfw: Boolean(row.is_nsfw),
     tags: coercePostTags(row.tags),
     original_post: map.get(row.original_post_id) ?? null,
     quoted_post: buildQuotedPostChain(row, chainLookup),

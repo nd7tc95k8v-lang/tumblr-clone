@@ -1,0 +1,17 @@
+{
+  "name": "QrtzApp",
+  "short_name": "Qrtz",
+  "description": "Creative social platform for art, identity, and expression.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#4C2CF5",
+  "icons": [
+    {
+      "src": "/logo/qrtz-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

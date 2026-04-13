@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ALLOWED_IMAGE_MIME_TYPES, validateImageFile } from "@/lib/image-upload-validation";
+import { APP_NAME } from "@/lib/constants";
 import {
   describeUsernameFieldError,
   normalizeUsername,
@@ -19,8 +20,7 @@ type Props = {
 
 type Availability = "idle" | "checking" | "available" | "taken" | "invalid" | "yours";
 
-const inputClass =
-  "w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus";
+const inputClass = "qrtz-field";
 
 export default function UsernameOnboarding({ supabase, userId, onComplete }: Props) {
   const [raw, setRaw] = useState("");
@@ -166,9 +166,11 @@ export default function UsernameOnboarding({ supabase, userId, onComplete }: Pro
     displayName.trim().length > 0 ? displayName.trim() : normalizeUsername(raw) ? `@${normalizeUsername(raw)}` : "You";
 
   return (
-    <div className="w-full max-w-md mx-auto p-6 bg-bg-secondary rounded-lg shadow-md border border-border flex flex-col gap-6">
+    <div className="qrtz-card mx-auto flex w-full max-w-md flex-col gap-6">
       <div>
-        <h2 className="text-lg font-semibold text-text mb-1">Welcome — set up your profile</h2>
+        <h2 className="mb-1 font-heading text-lg font-semibold text-text">
+          Welcome to {APP_NAME} — set up your profile
+        </h2>
         <p className="text-sm text-text-secondary">
           Pick a public username (required). You can add a display name, bio, or photo now, or skip and edit later in
           your profile.
@@ -274,7 +276,7 @@ export default function UsernameOnboarding({ supabase, userId, onComplete }: Pro
         <button
           type="submit"
           disabled={saving || !normalizeUsername(raw)}
-          className="py-2 px-4 bg-primary text-white font-semibold rounded hover:bg-primary-hover active:bg-primary-pressed disabled:opacity-50 transition-colors"
+          className="qrtz-btn-primary px-4 py-2"
         >
           {saving ? "Saving…" : "Continue to your feed"}
         </button>

@@ -126,17 +126,27 @@ export function postProfileAvatars(row: FeedPost): {
   };
 }
 
-export function bodyFromPost(row: FeedPost): { content: string; imageSrc: string | null } {
+export function bodyFromPost(row: FeedPost): {
+  content: string;
+  imageSrc: string | null;
+  image_storage_path: string | null;
+} {
   const reblogOf = row.reblog_of?.trim();
   const root = chainRootEmbed(row);
 
   if (reblogOf && root) {
-    const img = root.image_url?.trim() || null;
-    return { content: root.content, imageSrc: img };
+    return {
+      content: root.content,
+      imageSrc: root.image_url?.trim() || null,
+      image_storage_path: root.image_storage_path?.trim() || null,
+    };
   }
 
-  const img = row.image_url?.trim() || null;
-  return { content: row.content, imageSrc: img };
+  return {
+    content: row.content,
+    imageSrc: row.image_url?.trim() || null,
+    image_storage_path: row.image_storage_path?.trim() || null,
+  };
 }
 
 /** Attribution line in the reblog modal (who wrote the quoted body). */
@@ -184,9 +194,20 @@ export function countVisibleQuotedNestLevels(node: QuotedPostNode | null): numbe
 /** Default max visible nest depth (0…MAX-1); deeper tail is behind “Show full chain”. */
 export const QUOTE_NEST_MAX_INITIAL_DEPTH = 3;
 
-function leafImageFromQuoted(node: QuotedPostNode | null): string | null {
+/** Stable key for comparing “same media” across path + legacy URL. */
+export function postMediaKey(
+  storagePath: string | null | undefined,
+  legacyUrl: string | null | undefined,
+): string | null {
+  const p = storagePath?.trim() || null;
+  const u = legacyUrl?.trim() || null;
+  return p || u || null;
+}
+
+function leafMediaKeyFromQuoted(node: QuotedPostNode | null): string | null {
   const leaf = quotedChainLeaf(node);
-  return leaf?.image_url?.trim() || null;
+  if (!leaf) return null;
+  return postMediaKey(leaf.image_storage_path, leaf.image_url);
 }
 
 /**
@@ -196,8 +217,8 @@ function leafImageFromQuoted(node: QuotedPostNode | null): string | null {
 export function hasQuoteReblogLayer(post: FeedPost): boolean {
   if (!post.reblog_of?.trim()) return false;
   if (post.reblog_commentary?.trim()) return true;
-  const mine = post.image_url?.trim() || null;
-  const inherited = leafImageFromQuoted(post.quoted_post);
+  const mine = postMediaKey(post.image_storage_path, post.image_url);
+  const inherited = leafMediaKeyFromQuoted(post.quoted_post);
   if (mine && inherited && mine !== inherited) return true;
   if (mine && !inherited) return true;
   return false;
@@ -245,13 +266,20 @@ export function plainReblogViaProfile(post: FeedPost): {
   return fp;
 }
 
-/** Outer-card image for a quote layer: only when it is not the same snapshot as the quoted chain leaf. */
-export function quoteLayerOuterImageUrl(post: FeedPost): string | null {
+/** Outer-card image for a quote layer: only when media differs from quoted chain leaf. */
+export function quoteLayerOuterMedia(post: FeedPost): {
+  storagePath: string | null;
+  legacyUrl: string | null;
+} | null {
   if (!hasQuoteReblogLayer(post)) return null;
-  const mine = post.image_url?.trim() || null;
-  if (!mine) return null;
-  const inherited = leafImageFromQuoted(post.quoted_post);
-  if (!inherited || mine !== inherited) return mine;
+  const minePath = post.image_storage_path?.trim() || null;
+  const mineUrl = post.image_url?.trim() || null;
+  const mineKey = postMediaKey(minePath, mineUrl);
+  if (!mineKey) return null;
+  const inherited = leafMediaKeyFromQuoted(post.quoted_post);
+  if (!inherited || mineKey !== inherited) {
+    return { storagePath: minePath, legacyUrl: mineUrl };
+  }
   return null;
 }
 

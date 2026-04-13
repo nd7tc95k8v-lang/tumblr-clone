@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React, { useEffect, useMemo, useState } from "react";
+import { APP_NAME } from "@/lib/constants";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 
 const linkBase =
-  "block rounded-md px-3 py-2 text-sm font-medium text-text-secondary hover:bg-bg-secondary hover:text-text transition-colors";
-const linkActive = "bg-bg-secondary text-text font-medium hover:bg-bg-secondary";
+  "block rounded-lg px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg";
+const linkActive =
+  "border border-border bg-surface font-semibold text-text shadow-sm hover:bg-surface focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg";
 
 type NavItem = {
   href: string;
@@ -83,8 +85,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         href="/compose"
         className={
           createActive
-            ? "mt-3 block rounded-md py-2.5 px-3 text-center text-sm font-semibold bg-primary-pressed text-white"
-            : "mt-3 block rounded-md py-2.5 px-3 text-center text-sm font-semibold bg-primary text-white hover:bg-primary-hover active:bg-primary-pressed transition-colors"
+            ? "qrtz-btn-primary mt-3 block px-3 py-2.5 text-center text-sm"
+            : "qrtz-btn-primary mt-3 block px-3 py-2.5 text-center text-sm"
         }
       >
         Create post
@@ -95,20 +97,23 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const brand = (
     <Link
       href="/"
-      className="mb-6 block text-lg font-bold text-text tracking-tight hover:opacity-90 transition-opacity"
+      className="mb-6 block text-text hover:opacity-90 transition-opacity"
+      aria-label={APP_NAME}
     >
-      My Tumblr Clone
+      <img src="/logo/qrtz-logo.svg" alt={APP_NAME} className="h-8 w-auto" width={140} height={32} />
     </Link>
   );
 
   const bottomBar =
-    "flex flex-1 flex-col items-center justify-center gap-0.5 py-2 min-w-0 text-[11px] font-medium leading-tight text-center";
+    "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-center text-meta font-medium leading-tight";
+  const bottomBarFocus =
+    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-focus/70";
 
   return (
     <div className="min-h-full flex flex-col bg-bg">
       <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center border-b border-border bg-bg/95 px-4 backdrop-blur-sm md:hidden">
-        <Link href="/" className="text-base font-bold text-text">
-          My Tumblr Clone
+        <Link href="/" className="text-text" aria-label={APP_NAME}>
+          <img src="/logo/qrtz-logo.svg" alt={APP_NAME} className="h-7 w-auto" width={120} height={28} />
         </Link>
       </header>
 
@@ -120,15 +125,18 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         >
           {brand}
           {!supabase ? (
-            <p className="mb-4 text-xs text-text border border-warning/40 rounded-md px-2 py-1.5 bg-warning/10">
+            <p className="mb-4 rounded-lg border border-warning/40 bg-warning/10 px-2 py-1.5 text-meta text-text">
               Add Supabase env vars to enable full navigation.
             </p>
           ) : null}
           {sidebarNav}
         </aside>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 bg-bg">
-          {children}
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 bg-bg flex flex-col">
+          <div className="flex-1 min-h-0">{children}</div>
+          <footer className="shrink-0 border-t border-border px-4 py-4 text-center text-meta text-text-muted">
+            © 2026 {APP_NAME}
+          </footer>
         </main>
       </div>
 
@@ -140,7 +148,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             key={label}
             href={href}
-            className={`${bottomBar} ${
+            className={`${bottomBar} ${bottomBarFocus} ${
               match(pathname) ? "text-text" : "text-text-muted active:bg-bg-secondary"
             }`}
           >
@@ -149,11 +157,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         ))}
         <Link
           href="/compose"
-          className={`${bottomBar} ${
-            createActive ? "text-primary font-semibold" : "text-primary active:bg-primary-soft/40"
+          className={`${bottomBar} ${bottomBarFocus} ${
+            createActive ? "font-semibold text-accent-aqua" : "text-accent-aqua active:bg-primary-soft/40"
           }`}
         >
-          <span className="rounded-full bg-primary text-white text-[10px] font-bold px-2 py-1 leading-none mb-0.5">
+          <span className="qrtz-btn-primary mb-0.5 flex min-h-[1.5rem] min-w-[1.5rem] items-center justify-center rounded-full px-2 py-1 text-[10px] font-bold leading-none">
             +
           </span>
           <span className="truncate max-w-full">Post</span>
@@ -162,7 +170,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             key={label}
             href={href}
-            className={`${bottomBar} ${
+            className={`${bottomBar} ${bottomBarFocus} ${
               match(pathname) ? "text-text" : "text-text-muted active:bg-bg-secondary"
             }`}
           >

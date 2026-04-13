@@ -14,9 +14,9 @@ export default function ThemeAppearanceSettings() {
   const { preference, setPreference } = useTheme();
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-5 shadow-sm">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted mb-1">Appearance</h2>
-      <p className="text-xs text-text-secondary mb-4">
+    <section className="qrtz-card">
+      <h2 className="mb-1 text-meta font-semibold uppercase tracking-wide text-text-muted">Appearance</h2>
+      <p className="mb-4 text-meta text-text-secondary">
         Color theme for this device. System updates when your OS changes.
       </p>
       <div role="radiogroup" aria-label="Theme" className="flex flex-col gap-2">
@@ -29,14 +29,14 @@ export default function ThemeAppearanceSettings() {
               role="radio"
               aria-checked={selected}
               onClick={() => setPreference(o.value)}
-              className={`flex w-full flex-col items-start rounded-md border px-3 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-border-focus ${
+              className={`flex w-full flex-col items-start rounded-btn px-3 py-2.5 text-left transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/75 focus-visible:ring-offset-1 focus-visible:ring-offset-bg ${
                 selected
-                  ? "border-primary bg-primary-soft text-text"
-                  : "border-border bg-surface-elevated hover:bg-bg-secondary text-text"
+                  ? "qrtz-option-selected text-text"
+                  : "border border-border bg-surface-elevated hover:bg-bg-secondary text-text"
               }`}
             >
-              <span className="text-sm font-semibold">{o.label}</span>
-              <span className="text-xs font-normal text-text-secondary mt-0.5">{o.description}</span>
+              <span className="font-heading text-sm font-semibold">{o.label}</span>
+              <span className="mt-0.5 text-meta font-normal text-text-secondary">{o.description}</span>
             </button>
           );
         })}

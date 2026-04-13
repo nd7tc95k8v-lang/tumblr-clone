@@ -102,8 +102,8 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError }: P
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md mx-auto p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
-        <p className="font-medium mb-2">Supabase is not configured</p>
+      <div className="mx-auto w-full max-w-md rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
+        <p className="mb-2 font-medium">Supabase is not configured</p>
       </div>
     );
   }
@@ -124,8 +124,8 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError }: P
         currentUserId={user?.id ?? null}
       />
       {!user ? (
-        <p className="text-text-muted text-xs text-center">
-          <Link href="/" className="text-primary hover:text-primary-hover hover:underline transition-colors">
+        <p className="text-center text-meta text-text-muted">
+          <Link href="/" className="text-link hover:text-link-hover hover:underline transition-colors">
             Sign in
           </Link>{" "}
           to reblog.

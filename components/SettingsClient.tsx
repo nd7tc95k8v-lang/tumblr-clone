@@ -45,7 +45,7 @@ export default function SettingsClient() {
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-md p-6 rounded-lg border border-warning/40 bg-warning/10 text-text text-sm">
+      <div className="w-full max-w-md rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
         <p className="font-medium">Supabase is not configured.</p>
       </div>
     );
@@ -54,7 +54,7 @@ export default function SettingsClient() {
   return (
     <div className="w-full max-w-md flex flex-col gap-6">
       <ThemeAppearanceSettings />
-      <section className="rounded-lg border border-border bg-surface p-5 shadow-sm">
+      <section className="qrtz-card">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted mb-3">Account</h2>
         {user ? (
           <div className="flex flex-col gap-4">
@@ -73,7 +73,7 @@ export default function SettingsClient() {
             {username ? (
               <Link
                 href={`/profile/${encodeURIComponent(normalizeUsername(username))}`}
-                className="text-sm font-medium text-primary hover:text-primary-hover hover:underline w-fit transition-colors"
+                className="text-sm font-medium text-link hover:text-link-hover hover:underline w-fit transition-colors"
               >
                 Open your profile
               </Link>
@@ -87,7 +87,7 @@ export default function SettingsClient() {
                 setLoading(false);
                 void refresh();
               }}
-              className="w-fit py-2 px-4 rounded-md bg-text text-bg text-sm font-semibold hover:opacity-90 active:opacity-80 disabled:opacity-50 transition-opacity"
+              className="qrtz-btn-secondary w-fit px-4 py-2 text-sm"
             >
               {loading ? "Signing out…" : "Sign out"}
             </button>
@@ -97,7 +97,7 @@ export default function SettingsClient() {
             You&apos;re not signed in.{" "}
             <Link
               href="/"
-              className="text-primary font-medium hover:text-primary-hover hover:underline transition-colors"
+              className="text-link font-medium hover:text-link-hover hover:underline transition-colors"
             >
               Go to Home
             </Link>{" "}

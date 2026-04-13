@@ -19,7 +19,7 @@ export default function ProfileUsernameLink({ usernameRaw, children, className =
   return (
     <Link
       href={`/profile/${encodeURIComponent(slug)}`}
-      className={`${className} rounded-sm transition-colors hover:text-primary`.trim()}
+      className={`${className} rounded-sm transition-colors hover:text-link focus-visible:ring-offset-0`.trim()}
     >
       {children}
     </Link>

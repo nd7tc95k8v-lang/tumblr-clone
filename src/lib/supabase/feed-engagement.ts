@@ -15,7 +15,7 @@ function num(v: number | string | undefined): number {
 /**
  * Merge like/reblog counts and `liked_by_me` for feed rows.
  *
- * Tumblr-style thread model: `original_post_id` is the thread root. Client likes target that root
+ * Thread model: `original_post_id` is the thread root. Client likes target that root
  * (`usePostLikeToggle`), so we pass **distinct root ids** into:
  * - `post_like_counts` — counts rows in `likes` where `post_id` is each root (thread total).
  * - `post_ids_liked_by_auth_user` — which of those roots the viewer has liked.

@@ -71,7 +71,7 @@ export default function HumanCheckModal({ open, supabase, onClose, onComplete }:
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50"
+      className="qrtz-modal-overlay z-[100]"
       onClick={() => !busy && onClose()}
       role="presentation"
     >
@@ -80,39 +80,39 @@ export default function HumanCheckModal({ open, supabase, onClose, onComplete }:
         aria-modal="true"
         aria-labelledby="human-check-title"
         onClick={(ev) => ev.stopPropagation()}
-        className="w-full max-w-md rounded-lg bg-surface-elevated shadow-xl border border-border p-6"
+        className="qrtz-modal-panel"
       >
-        <h2 id="human-check-title" className="text-lg font-semibold text-text mb-2">
+        <h2 id="human-check-title" className="mb-3 font-heading text-lg font-semibold text-text">
           Quick human check
         </h2>
-        <p className="text-sm text-text-secondary mb-4">
+        <p className="mb-4 text-meta leading-relaxed text-text-secondary">
           Once a day we ask for this before you post, reblog, or follow. No third-party CAPTCHA.
         </p>
-        <p className="text-sm text-text mb-3">{challenge.prompt}</p>
-        <form onSubmit={(ev) => void handleSubmit(ev)} className="flex flex-col gap-3">
+        <p className="mb-4 text-base font-medium text-text">{challenge.prompt}</p>
+        <form onSubmit={(ev) => void handleSubmit(ev)} className="flex flex-col gap-4">
           <input
             type="text"
             autoComplete="off"
             value={answer}
             onChange={(ev) => setAnswer(ev.target.value)}
             disabled={busy}
-            className="w-full p-2 rounded border border-border bg-input text-text placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-border-focus"
+            className="qrtz-field"
             placeholder="Your answer"
           />
           {error ? <p className="text-sm text-error">{error}</p> : null}
-          <div className="flex flex-wrap gap-2 justify-end pt-1">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
             <button
               type="button"
               onClick={onClose}
               disabled={busy}
-              className="py-2 px-4 rounded border border-border bg-surface text-text text-sm font-medium hover:bg-bg-secondary disabled:opacity-50 transition-colors"
+              className="qrtz-btn-secondary px-4 py-2 text-sm"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={busy}
-              className="py-2 px-4 rounded bg-primary text-white text-sm font-semibold hover:bg-primary-hover active:bg-primary-pressed disabled:opacity-50 transition-colors"
+              className="qrtz-btn-primary px-4 py-2 text-sm"
             >
               {busy ? "Saving…" : "Continue"}
             </button>

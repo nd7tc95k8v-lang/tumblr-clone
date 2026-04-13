@@ -10,9 +10,11 @@ export type ChainPostRow = {
   created_at: string;
   user_id: string;
   image_url?: string | null;
+  image_storage_path?: string | null;
   reblog_of?: string | null;
   reblog_commentary?: string | null;
   original_post_id: string;
+  is_nsfw: boolean;
   tags: string[];
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
 };
@@ -28,9 +30,11 @@ export const POST_CHAIN_SELECT = `
   created_at,
   user_id,
   image_url,
+  image_storage_path,
   reblog_of,
   reblog_commentary,
   original_post_id,
+  is_nsfw,
   tags,
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
@@ -38,9 +42,12 @@ export const POST_CHAIN_SELECT = `
 const IN_CHUNK = 100;
 
 function normalizeChainQueryRow(row: ChainQueryRow): ChainPostRow {
+  const path = row.image_storage_path?.trim() || null;
   return {
     ...row,
     original_post_id: threadRootPostId(row),
+    is_nsfw: Boolean(row.is_nsfw),
+    image_storage_path: path,
     tags: coercePostTags(row.tags),
   };
 }
@@ -125,8 +132,10 @@ function embedParentNode(
     created_at: row.created_at,
     user_id: row.user_id,
     image_url: row.image_url,
+    image_storage_path: row.image_storage_path ?? null,
     reblog_of: row.reblog_of ?? null,
     reblog_commentary: row.reblog_commentary ?? null,
+    is_nsfw: row.is_nsfw,
     tags: row.tags,
     author: row.author,
     quoted_post: quoted,

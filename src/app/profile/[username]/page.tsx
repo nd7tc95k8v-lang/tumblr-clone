@@ -50,7 +50,7 @@ export default async function ProfilePage({ params }: PageProps) {
     return (
       <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
         <p className="text-text-secondary text-sm mb-4">Invalid username.</p>
-        <Link href="/" className="text-sm text-primary hover:text-primary-hover hover:underline transition-colors">
+        <Link href="/" className="text-sm text-link hover:text-link-hover hover:underline transition-colors">
           Back to home
         </Link>
       </main>
@@ -59,7 +59,7 @@ export default async function ProfilePage({ params }: PageProps) {
 
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("id, username, display_name, bio, avatar_url")
+    .select("id, username, display_name, bio, avatar_url, profile_is_nsfw, default_posts_nsfw")
     .eq("username", normalized)
     .maybeSingle();
 
@@ -67,7 +67,7 @@ export default async function ProfilePage({ params }: PageProps) {
     return (
       <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
         <p className="text-error text-sm">{profileError.message}</p>
-        <Link href="/" className="mt-4 text-sm text-primary hover:text-primary-hover hover:underline transition-colors">
+        <Link href="/" className="mt-4 text-sm text-link hover:text-link-hover hover:underline transition-colors">
           Back to home
         </Link>
       </main>
@@ -79,7 +79,7 @@ export default async function ProfilePage({ params }: PageProps) {
       <main className="min-h-screen bg-bg flex flex-col items-center justify-center px-4 py-16">
         <p className="text-text-secondary text-sm mb-1">No user named @{normalized}.</p>
         <p className="text-text-muted text-xs mb-6">That profile does not exist.</p>
-        <Link href="/" className="text-sm text-primary hover:text-primary-hover hover:underline transition-colors">
+        <Link href="/" className="text-sm text-link hover:text-link-hover hover:underline transition-colors">
           Back to home
         </Link>
       </main>
@@ -92,6 +92,8 @@ export default async function ProfilePage({ params }: PageProps) {
     display_name: profileRow.display_name,
     bio: profileRow.bio,
     avatar_url: profileRow.avatar_url?.trim() ? profileRow.avatar_url : null,
+    profile_is_nsfw: Boolean(profileRow.profile_is_nsfw),
+    default_posts_nsfw: Boolean(profileRow.default_posts_nsfw),
   };
 
   const [{ data: postsData }, { data: followStats }] = await Promise.all([
