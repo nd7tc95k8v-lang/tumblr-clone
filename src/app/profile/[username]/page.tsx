@@ -4,9 +4,9 @@ import Link from "next/link";
 import ProfilePageClient from "../../../../components/ProfilePageClient";
 import type { ProfilePublic } from "@/types/profile";
 import { normalizeRouteUsername } from "@/lib/username";
-import { POST_FEED_SELECT } from "@/lib/supabase/post-feed-select";
+import { fetchProfileFollowCounts } from "@/lib/supabase/follow-counts";
+import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
-import type { FeedPost } from "@/types/post";
 
 type PageProps = {
   params: Promise<{ username: string }>;
@@ -59,7 +59,7 @@ export default async function ProfilePage({ params }: PageProps) {
 
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("id, username, display_name, bio")
+    .select("id, username, display_name, bio, avatar_url")
     .eq("username", normalized)
     .maybeSingle();
 
@@ -91,13 +91,19 @@ export default async function ProfilePage({ params }: PageProps) {
     username: profileRow.username,
     display_name: profileRow.display_name,
     bio: profileRow.bio,
+    avatar_url: profileRow.avatar_url?.trim() ? profileRow.avatar_url : null,
   };
 
-  const { data: postsData } = await supabase
-    .from("posts")
-    .select(POST_FEED_SELECT)
-    .eq("user_id", profile.id)
-    .order("created_at", { ascending: false });
+  const [{ data: postsData }, { data: followStats }] = await Promise.all([
+    fetchFeedPosts(supabase, { filterUserIds: [profile.id] }),
+    fetchProfileFollowCounts(supabase, profile.id),
+  ]);
 
-  return <ProfilePageClient profile={profile} initialPosts={(postsData as FeedPost[]) ?? []} />;
+  return (
+    <ProfilePageClient
+      profile={profile}
+      initialPosts={postsData ?? []}
+      initialFollowStats={followStats}
+    />
+  );
 }

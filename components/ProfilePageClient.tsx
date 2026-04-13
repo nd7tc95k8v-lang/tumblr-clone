@@ -1,16 +1,19 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { POST_FEED_SELECT } from "@/lib/supabase/post-feed-select";
+import { fetchProfileFollowCounts } from "@/lib/supabase/follow-counts";
+import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { reblogInsertFields } from "@/lib/reblog";
 import { normalizeUsername } from "@/lib/username";
+import type { ProfileFollowStats } from "@/types/follows";
 import type { ProfilePublic } from "@/types/profile";
 import type { FeedPost } from "@/types/post";
 import EditProfileModal from "./EditProfileModal";
 import PostCard from "./PostCard";
+import ProfileAvatar from "./ProfileAvatar";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 
 export type { ProfilePublic };
@@ -18,9 +21,10 @@ export type { ProfilePublic };
 type Props = {
   profile: ProfilePublic;
   initialPosts: FeedPost[];
+  initialFollowStats: ProfileFollowStats;
 };
 
-export default function ProfilePageClient({ profile, initialPosts }: Props) {
+export default function ProfilePageClient({ profile, initialPosts, initialFollowStats }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
@@ -30,6 +34,7 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState<boolean | null>(null);
   const [followBusy, setFollowBusy] = useState(false);
+  const [followStats, setFollowStats] = useState<ProfileFollowStats>(initialFollowStats);
 
   useEffect(() => {
     setLocalProfile(profile);
@@ -38,6 +43,10 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
   useEffect(() => {
     setPosts(initialPosts);
   }, [initialPosts]);
+
+  useEffect(() => {
+    setFollowStats(initialFollowStats);
+  }, [initialFollowStats]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -54,20 +63,18 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
-    const { data, error } = await supabase
-      .from("posts")
-      .select(POST_FEED_SELECT)
-      .eq("user_id", localProfile.id)
-      .order("created_at", { ascending: false });
+    const { data, error } = await fetchFeedPosts(supabase, {
+      filterUserIds: [localProfile.id],
+    });
     if (error) {
       console.error(error);
       return;
     }
-    setPosts((data as FeedPost[]) ?? []);
+    setPosts(data ?? []);
   }, [supabase, localProfile.id]);
 
   const handleReblog = useCallback(
-    async (original: FeedPost) => {
+    async (original: FeedPost, commentary?: string | null) => {
       if (!supabase) return;
       const {
         data: { user: u },
@@ -79,9 +86,7 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
       }
       const { error } = await supabase.from("posts").insert({
         user_id: u.id,
-        content: original.content,
-        image_url: original.image_url ?? null,
-        reblog_of: original.id,
+        ...reblogInsertFields(original, { commentary }),
       });
       if (error) {
         console.error(error);
@@ -121,6 +126,14 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
     void refreshFollowState();
   }, [refreshFollowState]);
 
+  const refreshFollowCounts = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await fetchProfileFollowCounts(supabase, localProfile.id);
+    if (!error) {
+      setFollowStats(data);
+    }
+  }, [supabase, localProfile.id]);
+
   const handleFollowToggle = useCallback(async () => {
     if (!supabase || !user || user.id === localProfile.id || followBusy) return;
     setFollowBusy(true);
@@ -137,6 +150,7 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
           return;
         }
         setIsFollowing(false);
+        await refreshFollowCounts();
       } else {
         const { error } = await supabase.from("follows").insert({
           follower_id: user.id,
@@ -148,11 +162,12 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
           return;
         }
         setIsFollowing(true);
+        await refreshFollowCounts();
       }
     } finally {
       setFollowBusy(false);
     }
-  }, [supabase, user, localProfile.id, isFollowing, followBusy]);
+  }, [supabase, user, localProfile.id, isFollowing, followBusy, refreshFollowCounts]);
 
   const handleProfileSaved = useCallback(
     (next: ProfilePublic) => {
@@ -170,17 +185,18 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
   return (
     <main className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center py-10 px-4">
       <div className="w-full max-w-xl flex flex-col gap-6">
-        <nav>
-          <Link
-            href="/"
-            className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            ← Home
-          </Link>
-        </nav>
-
         <header className="bg-white dark:bg-zinc-800 rounded-lg shadow p-6">
           <div className="flex flex-wrap items-start justify-between gap-3">
+            <ProfileAvatar
+              url={localProfile.avatar_url}
+              label={
+                localProfile.display_name?.trim()
+                  ? localProfile.display_name.trim()
+                  : `@${localProfile.username}`
+              }
+              size="lg"
+              className="shrink-0"
+            />
             <div className="min-w-0 flex-1">
               <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
                 <ProfileUsernameLink usernameRaw={localProfile.username} className="font-bold text-inherit">
@@ -195,6 +211,13 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
                   {localProfile.bio.trim()}
                 </p>
               ) : null}
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-3">
+                <span className="font-medium text-zinc-700 dark:text-zinc-300">{followStats.followers}</span>{" "}
+                followers
+                <span className="mx-2 text-zinc-300 dark:text-zinc-600">·</span>
+                <span className="font-medium text-zinc-700 dark:text-zinc-300">{followStats.following}</span>{" "}
+                following
+              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               {isOwnProfile && supabase ? (
@@ -257,10 +280,10 @@ export default function ProfilePageClient({ profile, initialPosts }: Props) {
                   post={post}
                   rebloggingId={rebloggingId}
                   showReblog={showReblog}
-                  onReblog={async (p) => {
+                  onReblog={async (p, commentary) => {
                     setRebloggingId(p.id);
                     try {
-                      await handleReblog(p);
+                      await handleReblog(p, commentary);
                     } finally {
                       setRebloggingId(null);
                     }

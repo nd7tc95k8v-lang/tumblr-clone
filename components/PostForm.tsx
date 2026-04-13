@@ -2,6 +2,7 @@
 
 import React, { useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { parseCommaSeparatedTags } from "@/lib/tags";
 
 type Props = {
   supabase: SupabaseClient;
@@ -10,6 +11,7 @@ type Props = {
 
 const PostForm = ({ supabase, onPosted }: Props) => {
   const [content, setContent] = useState("");
+  const [tagsRaw, setTagsRaw] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,10 +61,13 @@ const PostForm = ({ supabase, onPosted }: Props) => {
         imageUrl = publicUrlData.publicUrl;
       }
 
+      const tags = parseCommaSeparatedTags(tagsRaw);
+
       const { error: insertError } = await supabase.from("posts").insert({
         user_id: user.id,
         content,
         image_url: imageUrl,
+        tags,
       });
 
       if (insertError) {
@@ -72,6 +77,7 @@ const PostForm = ({ supabase, onPosted }: Props) => {
       }
 
       setContent("");
+      setTagsRaw("");
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       await onPosted();
@@ -96,6 +102,20 @@ const PostForm = ({ supabase, onPosted }: Props) => {
         placeholder="What's on your mind?"
         required
       />
+      <div className="flex flex-col gap-1">
+        <label htmlFor="post-tags" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          Tags <span className="font-normal text-zinc-500">(optional, comma-separated)</span>
+        </label>
+        <input
+          id="post-tags"
+          type="text"
+          value={tagsRaw}
+          onChange={(e) => setTagsRaw(e.target.value)}
+          disabled={submitting}
+          placeholder="e.g. photo, weekend, cats"
+          className="w-full p-2 rounded border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-blue-400"
+        />
+      </div>
       <div className="flex flex-col gap-1">
         <label
           htmlFor="post-image"

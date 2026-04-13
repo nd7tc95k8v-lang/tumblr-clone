@@ -1,9 +1,11 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { POST_FEED_SELECT } from "@/lib/supabase/post-feed-select";
+import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { reblogInsertFields } from "@/lib/reblog";
 import { profileNeedsOnboarding } from "@/lib/username";
 import type { FeedPost } from "@/types/post";
 import AuthForm from "./AuthForm";
@@ -75,8 +77,7 @@ function ClientShell() {
     setPostsLoading(true);
     setPostsError(null);
     try {
-      let query = supabase.from("posts").select(POST_FEED_SELECT).order("created_at", { ascending: false });
-
+      let filterUserIds: string[] | undefined;
       if (user) {
         const { data: followRows, error: followError } = await supabase
           .from("follows")
@@ -87,23 +88,22 @@ function ClientShell() {
           return;
         }
         const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
-        const authorIds = Array.from(new Set<string>([user.id, ...followedIds]));
-        query = query.in("user_id", authorIds);
+        filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
       }
 
-      const { data, error } = await query;
+      const { data, error } = await fetchFeedPosts(supabase, { filterUserIds });
       if (error) {
         setPostsError(error.message);
         return;
       }
-      setPosts((data as FeedPost[]) ?? []);
+      setPosts(data ?? []);
     } finally {
       setPostsLoading(false);
     }
   }, [supabase, user]);
 
   const handleReblog = useCallback(
-    async (original: FeedPost) => {
+    async (original: FeedPost, commentary?: string | null) => {
       if (!supabase) return;
       const {
         data: { user },
@@ -115,9 +115,7 @@ function ClientShell() {
       }
       const { error } = await supabase.from("posts").insert({
         user_id: user.id,
-        content: original.content,
-        image_url: original.image_url ?? null,
-        reblog_of: original.id,
+        ...reblogInsertFields(original, { commentary }),
       });
       if (error) {
         console.error(error);
@@ -150,7 +148,8 @@ function ClientShell() {
   useEffect(() => {
     if (!supabase || !sessionReady) return;
     if (!user) {
-      void loadPosts();
+      setPosts([]);
+      setPostsError(null);
       return;
     }
     if (needsOnboarding) {
@@ -234,18 +233,17 @@ function ClientShell() {
       ) : user ? (
         <p className="text-zinc-500 text-sm">Loading profile…</p>
       ) : (
-        <div className="w-full max-w-xl flex flex-col items-center gap-4">
-          <p className="text-zinc-600 dark:text-zinc-400 text-sm text-center">
-            You&apos;re viewing the public feed. Sign in to see posts from you and people you follow, and to post.
+        <div className="w-full max-w-xl flex flex-col items-center gap-4 text-center">
+          <p className="text-zinc-600 dark:text-zinc-400 text-sm">
+            Sign in to see posts from you and people you follow, and to post. Home is your personal feed only.
           </p>
-          <Feed
-            posts={posts}
-            loading={postsLoading}
-            error={postsError}
-            onRetry={loadPosts}
-            onReblog={handleReblog}
-            showReblog={false}
-          />
+          <p className="text-zinc-500 dark:text-zinc-400 text-sm">
+            Browse everything that&apos;s public on{" "}
+            <Link href="/explore" className="text-blue-600 dark:text-blue-400 font-medium hover:underline">
+              Explore
+            </Link>
+            .
+          </p>
         </div>
       )}
     </>

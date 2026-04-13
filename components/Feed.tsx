@@ -9,7 +9,7 @@ type Props = {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  onReblog: (post: FeedPost) => void | Promise<void>;
+  onReblog: (post: FeedPost, commentary?: string | null) => void | Promise<void>;
   showReblog?: boolean;
 };
 
@@ -50,10 +50,10 @@ const Feed: React.FC<Props> = ({ posts, loading, error, onRetry, onReblog, showR
           post={post}
           rebloggingId={rebloggingId}
           showReblog={showReblog}
-          onReblog={async (p) => {
+          onReblog={async (p, commentary) => {
             setRebloggingId(p.id);
             try {
-              await onReblog(p);
+              await onReblog(p, commentary);
             } finally {
               setRebloggingId(null);
             }

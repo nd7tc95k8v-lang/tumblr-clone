@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   isValidUsernameFormat,
@@ -8,6 +8,9 @@ import {
   usernameLooksLikeEmail,
 } from "@/lib/username";
 import type { ProfilePublic } from "@/types/profile";
+import ProfileAvatar from "./ProfileAvatar";
+
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
 type Props = {
   open: boolean;
@@ -35,6 +38,10 @@ export default function EditProfileModal({
   const [availability, setAvailability] = useState<Availability>("idle");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [removeAvatar, setRemoveAvatar] = useState(false);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -43,7 +50,20 @@ export default function EditProfileModal({
     setBio(profile.bio ?? "");
     setSaveError(null);
     setAvailability("idle");
+    setAvatarFile(null);
+    setRemoveAvatar(false);
+    if (avatarInputRef.current) avatarInputRef.current.value = "";
   }, [open, profile]);
+
+  useEffect(() => {
+    if (!avatarFile) {
+      setLocalPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(avatarFile);
+    setLocalPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [avatarFile]);
 
   const checkAvailability = useCallback(
     async (value: string) => {
@@ -98,6 +118,11 @@ export default function EditProfileModal({
 
   if (!open) return null;
 
+  const avatarLabel =
+    displayName.trim().length > 0 ? displayName.trim() : `@${normalizeUsername(usernameRaw) || profile.username}`;
+
+  const avatarDisplayUrl = localPreviewUrl ?? (removeAvatar ? null : profile.avatar_url?.trim() || null);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaveError(null);
@@ -141,14 +166,53 @@ export default function EditProfileModal({
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
-          username: normalized,
-          display_name: displayTrim.length > 0 ? displayTrim : null,
-          bio: bioTrim.length > 0 ? bioTrim : null,
-        })
-        .eq("id", userId);
+      let nextAvatarUrl: string | null | undefined;
+      if (removeAvatar) {
+        nextAvatarUrl = null;
+      } else if (avatarFile) {
+        if (!avatarFile.type.startsWith("image/")) {
+          setSaveError("Avatar must be an image file.");
+          return;
+        }
+        if (avatarFile.size > AVATAR_MAX_BYTES) {
+          setSaveError("Avatar must be 2 MB or smaller.");
+          return;
+        }
+        const rawExt = avatarFile.name.split(".").pop();
+        const fileExt =
+          rawExt && /^[a-z0-9]+$/i.test(rawExt) && rawExt.length <= 8 ? rawExt.toLowerCase() : "jpg";
+        const filePath = `${user.id}/avatar.${fileExt}`;
+
+        const { error: uploadError } = await supabase.storage.from("avatars").upload(filePath, avatarFile, {
+          contentType: avatarFile.type || `image/${fileExt}`,
+          upsert: true,
+        });
+
+        if (uploadError) {
+          console.error(uploadError);
+          setSaveError(uploadError.message || "Avatar upload failed.");
+          return;
+        }
+
+        const { data: publicUrlData } = supabase.storage.from("avatars").getPublicUrl(filePath);
+        nextAvatarUrl = publicUrlData.publicUrl;
+      }
+
+      const updatePayload: {
+        username: string;
+        display_name: string | null;
+        bio: string | null;
+        avatar_url?: string | null;
+      } = {
+        username: normalized,
+        display_name: displayTrim.length > 0 ? displayTrim : null,
+        bio: bioTrim.length > 0 ? bioTrim : null,
+      };
+      if (nextAvatarUrl !== undefined) {
+        updatePayload.avatar_url = nextAvatarUrl;
+      }
+
+      const { error } = await supabase.from("profiles").update(updatePayload).eq("id", userId);
 
       if (error) {
         if (String(error.code) === "23505") {
@@ -164,6 +228,7 @@ export default function EditProfileModal({
         username: normalized,
         display_name: displayTrim.length > 0 ? displayTrim : null,
         bio: bioTrim.length > 0 ? bioTrim : null,
+        avatar_url: nextAvatarUrl !== undefined ? nextAvatarUrl : profile.avatar_url,
       });
       onClose();
     } finally {
@@ -201,6 +266,42 @@ export default function EditProfileModal({
           Edit profile
         </h2>
         <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Profile photo</span>
+            <div className="flex flex-wrap items-center gap-4">
+              <ProfileAvatar url={avatarDisplayUrl} label={avatarLabel} size="lg" />
+              <div className="flex flex-col gap-2">
+                <input
+                  ref={avatarInputRef}
+                  id="edit-avatar"
+                  type="file"
+                  accept="image/*"
+                  disabled={saving}
+                  className="text-sm text-zinc-700 dark:text-zinc-300 file:mr-3 file:rounded file:border-0 file:bg-zinc-200 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-800 hover:file:bg-zinc-300 dark:file:bg-zinc-700 dark:file:text-zinc-100 dark:hover:file:bg-zinc-600"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0] ?? null;
+                    setAvatarFile(f);
+                    if (f) setRemoveAvatar(false);
+                  }}
+                />
+                {profile.avatar_url || avatarFile ? (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => {
+                      setAvatarFile(null);
+                      setRemoveAvatar(true);
+                      if (avatarInputRef.current) avatarInputRef.current.value = "";
+                    }}
+                    className="text-left text-xs text-red-700 dark:text-red-400 hover:underline disabled:opacity-50"
+                  >
+                    Remove photo
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
           <div className="flex flex-col gap-1">
             <label htmlFor="edit-username" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
               Username
