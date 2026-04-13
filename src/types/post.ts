@@ -4,6 +4,15 @@ export type PostAuthorEmbed = {
   avatar_url?: string | null;
 };
 
+/** Row from `post_images` (ordered gallery). */
+export type PostImageRow = {
+  id: string;
+  post_id: string;
+  storage_path: string;
+  position: number;
+  created_at?: string;
+};
+
 /** Post row + author (used for merged chain root). */
 export type EmbeddedPostWithAuthor = {
   id: string;
@@ -11,6 +20,8 @@ export type EmbeddedPostWithAuthor = {
   image_url?: string | null;
   /** Path in `post-images` bucket; signed URLs at display time when set. */
   image_storage_path?: string | null;
+  /** Gallery rows when present; legacy posts may omit this. */
+  post_images?: PostImageRow[] | null;
   user_id: string;
   tags?: string[] | null;
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
@@ -29,6 +40,7 @@ export type QuotedPostNode = {
   user_id: string;
   image_url?: string | null;
   image_storage_path?: string | null;
+  post_images?: PostImageRow[] | null;
   reblog_of?: string | null;
   reblog_commentary?: string | null;
   /** Inherited from DB; used for future mature-content UI. */
@@ -46,6 +58,7 @@ export type FeedPost = {
   image_url?: string | null;
   /** Set for new uploads; reblogs copy parent path. */
   image_storage_path?: string | null;
+  post_images?: PostImageRow[] | null;
   reblog_of?: string | null;
   /** Optional note from the reblogger; only set when `reblog_of` is non-null. */
   reblog_commentary?: string | null;

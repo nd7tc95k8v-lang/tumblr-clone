@@ -83,7 +83,7 @@ export default function PostMediaImage({ supabase, storagePath, legacyUrl, alt, 
     }
     return path ? (
       <div
-        className={`rounded-card bg-bg-secondary animate-pulse max-h-[500px] min-h-[120px] w-full ${className ?? ""}`}
+        className={`min-h-[120px] w-full max-h-[70vh] animate-pulse rounded-card bg-bg-secondary ${className ?? ""}`}
         aria-hidden
       />
     ) : null;

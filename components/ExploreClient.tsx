@@ -112,7 +112,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
 
   return (
     <>
-      <p className="text-text-secondary text-sm text-center max-w-xl w-full">
+      <p className="text-text-secondary text-sm text-center max-w-4xl w-full">
         Public posts from everyone, newest first. Your home feed still shows only you and people you follow.
       </p>
       <Feed

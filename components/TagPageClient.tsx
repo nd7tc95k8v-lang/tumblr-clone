@@ -110,7 +110,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError }: P
 
   return (
     <>
-      <p className="text-text-secondary text-sm text-center max-w-xl w-full">
+      <p className="text-text-secondary text-sm text-center max-w-4xl w-full">
         Posts tagged with <span className="font-semibold text-text">#{tag}</span>.
       </p>
       <Feed

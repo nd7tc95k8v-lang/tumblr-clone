@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { coercePostImageRows } from "@/lib/post-images";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import {
   buildQuotedPostChain,
@@ -23,6 +24,7 @@ export const POST_FEED_BASE_SELECT = `
   is_nsfw,
   nsfw_source,
   tags,
+  post_images ( id, post_id, storage_path, position, created_at ),
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
 
@@ -35,6 +37,7 @@ export const POST_ORIGINAL_SELECT = `
   user_id,
   is_nsfw,
   tags,
+  post_images ( id, post_id, storage_path, position, created_at ),
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
 
@@ -44,10 +47,11 @@ type FeedRow = Omit<
 >;
 
 /** Raw row from PostgREST (`original_post_id` may be null on legacy rows). */
-type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw"> & {
+type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw" | "post_images"> & {
   original_post_id?: string | null;
   is_nsfw?: boolean | null;
   nsfw_source?: string | null;
+  post_images?: unknown;
 };
 
 function feedRowToEmbeddedOriginal(row: FeedRow): EmbeddedPostWithAuthor {
@@ -56,6 +60,7 @@ function feedRowToEmbeddedOriginal(row: FeedRow): EmbeddedPostWithAuthor {
     content: row.content,
     image_url: row.image_url,
     image_storage_path: row.image_storage_path,
+    post_images: row.post_images ?? null,
     user_id: row.user_id,
     tags: coercePostTags(row.tags),
     author: row.author,
@@ -71,6 +76,7 @@ function feedRowToChainRow(r: FeedRow): ChainPostRow {
     user_id: r.user_id,
     image_url: r.image_url,
     image_storage_path: r.image_storage_path,
+    post_images: r.post_images ?? null,
     reblog_of: r.reblog_of,
     reblog_commentary: r.reblog_commentary,
     original_post_id: r.original_post_id,
@@ -86,6 +92,7 @@ function chainRowToEmbedded(row: ChainPostRow): EmbeddedPostWithAuthor {
     content: row.content,
     image_url: row.image_url,
     image_storage_path: row.image_storage_path,
+    post_images: row.post_images ?? null,
     user_id: row.user_id,
     tags: row.tags,
     author: row.author,
@@ -144,6 +151,7 @@ export async function fetchFeedPosts(
     ...r,
     original_post_id: threadRootPostId(r),
     is_nsfw: Boolean(r.is_nsfw),
+    post_images: coercePostImageRows(r.post_images),
   }));
   const feedById = new Map<string, FeedRow>(feedRows.map((r) => [r.id, r]));
 
@@ -192,8 +200,12 @@ export async function fetchFeedPosts(
     }
 
     for (const o of originals ?? []) {
-      const row = o as EmbeddedPostWithAuthor;
-      map.set(row.id, { ...row, tags: coercePostTags(row.tags) });
+      const row = o as EmbeddedPostWithAuthor & { post_images?: unknown };
+      map.set(row.id, {
+        ...row,
+        tags: coercePostTags(row.tags),
+        post_images: coercePostImageRows(row.post_images),
+      });
     }
   }
 

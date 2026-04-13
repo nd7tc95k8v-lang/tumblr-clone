@@ -1,3 +1,4 @@
+import { normalizePostImages, postImagesFingerprint, type NormalizedPostImage } from "@/lib/post-images";
 import { usernameLooksLikeEmail } from "@/lib/username";
 import type { EmbeddedPostWithAuthor, FeedPost, QuotedPostNode } from "@/types/post";
 import { unwrapEmbed } from "@/types/post";
@@ -204,10 +205,10 @@ export function postMediaKey(
   return p || u || null;
 }
 
-function leafMediaKeyFromQuoted(node: QuotedPostNode | null): string | null {
+function leafImagesFingerprintFromQuoted(node: QuotedPostNode | null): string {
   const leaf = quotedChainLeaf(node);
-  if (!leaf) return null;
-  return postMediaKey(leaf.image_storage_path, leaf.image_url);
+  if (!leaf) return "";
+  return postImagesFingerprint(leaf);
 }
 
 /**
@@ -217,10 +218,10 @@ function leafMediaKeyFromQuoted(node: QuotedPostNode | null): string | null {
 export function hasQuoteReblogLayer(post: FeedPost): boolean {
   if (!post.reblog_of?.trim()) return false;
   if (post.reblog_commentary?.trim()) return true;
-  const mine = postMediaKey(post.image_storage_path, post.image_url);
-  const inherited = leafMediaKeyFromQuoted(post.quoted_post);
-  if (mine && inherited && mine !== inherited) return true;
+  const mine = postImagesFingerprint(post);
+  const inherited = leafImagesFingerprintFromQuoted(post.quoted_post);
   if (mine && !inherited) return true;
+  if (mine && inherited && mine !== inherited) return true;
   return false;
 }
 
@@ -266,20 +267,16 @@ export function plainReblogViaProfile(post: FeedPost): {
   return fp;
 }
 
-/** Outer-card image for a quote layer: only when media differs from quoted chain leaf. */
-export function quoteLayerOuterMedia(post: FeedPost): {
-  storagePath: string | null;
-  legacyUrl: string | null;
-} | null {
+/**
+ * Outer-card media for a quote layer: only when the gallery / legacy image set differs from the quoted chain leaf.
+ */
+export function quoteLayerOuterMedia(post: FeedPost): NormalizedPostImage[] | null {
   if (!hasQuoteReblogLayer(post)) return null;
-  const minePath = post.image_storage_path?.trim() || null;
-  const mineUrl = post.image_url?.trim() || null;
-  const mineKey = postMediaKey(minePath, mineUrl);
-  if (!mineKey) return null;
-  const inherited = leafMediaKeyFromQuoted(post.quoted_post);
-  if (!inherited || mineKey !== inherited) {
-    return { storagePath: minePath, legacyUrl: mineUrl };
-  }
+  const mine = normalizePostImages(post);
+  if (mine.length === 0) return null;
+  const inherited = leafImagesFingerprintFromQuoted(post.quoted_post);
+  const mineFp = postImagesFingerprint(post);
+  if (!inherited || mineFp !== inherited) return mine;
   return null;
 }
 

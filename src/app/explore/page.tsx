@@ -9,9 +9,9 @@ export default async function ExplorePage() {
   const supabase = createAnonServerClient();
   if (!supabase) {
     return (
-      <main className="min-h-screen bg-bg flex flex-col items-center py-10 px-4">
-        <h1 className="text-3xl md:text-4xl font-bold mb-2 text-text">Explore</h1>
-        <div className="w-full max-w-xl flex flex-col items-center gap-6">
+      <main className="flex min-h-screen flex-col items-center bg-bg px-4 py-10 md:px-6">
+        <h1 className="mb-2 text-3xl font-bold text-text md:text-4xl">Explore</h1>
+        <div className="flex w-full max-w-4xl flex-col items-center gap-6">
           <ExploreClient initialPosts={[]} initialLoadError={null} />
         </div>
       </main>
@@ -21,10 +21,10 @@ export default async function ExplorePage() {
   const { data, error } = await fetchFeedPosts(supabase, {});
 
   return (
-    <main className="min-h-screen bg-bg flex flex-col items-center py-10 px-4">
-      <h1 className="text-3xl md:text-4xl font-bold mb-2 text-text">Explore</h1>
-      <section className="w-full flex justify-center">
-        <div className="w-full max-w-xl flex flex-col items-center gap-6">
+    <main className="flex min-h-screen flex-col items-center bg-bg px-4 py-10 md:px-6">
+      <h1 className="mb-2 text-3xl font-bold text-text md:text-4xl">Explore</h1>
+      <section className="flex w-full justify-center">
+        <div className="flex w-full max-w-4xl flex-col items-center gap-6">
           <ExploreClient initialPosts={data ?? []} initialLoadError={error?.message ?? null} />
         </div>
       </section>

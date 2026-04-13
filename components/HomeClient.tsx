@@ -9,7 +9,6 @@ import { profileNeedsOnboarding } from "@/lib/username";
 import type { FeedPost } from "@/types/post";
 import AuthForm from "./AuthForm";
 import Feed from "./Feed";
-import PostForm from "./PostForm";
 import UsernameOnboarding from "./UsernameOnboarding";
 import { useReblogAction } from "./useReblogAction";
 
@@ -172,13 +171,6 @@ function ClientShell() {
 
   return (
     <>
-      <AuthForm
-        supabase={supabase}
-        user={user}
-        onAuthChange={refreshSession}
-        publicUsername={profile?.username?.trim() || null}
-        needsProfileSetup={Boolean(user && profile && profileNeedsOnboarding(profile.username))}
-      />
       {!sessionReady ? (
         <p className="text-text-muted text-sm">Loading…</p>
       ) : user && profileLoading ? (
@@ -196,7 +188,7 @@ function ClientShell() {
         />
       ) : user && showFeed ? (
         <>
-          <div className="w-full max-w-xl flex flex-col items-stretch gap-3">
+          <div className="flex w-full max-w-4xl flex-col items-stretch gap-3">
             <div
               className="flex rounded-card border border-border bg-bg-secondary p-0.5"
               role="tablist"
@@ -238,7 +230,7 @@ function ClientShell() {
             </p>
           </div>
           {homeFeedTab === "following" && followingOthersCount === 0 ? (
-            <div className="w-full max-w-xl rounded-card border border-accent-aqua/35 bg-surface-blue px-4 py-3 text-sm text-text">
+            <div className="w-full max-w-4xl rounded-card border border-accent-aqua/35 bg-surface-blue px-4 py-3 text-sm text-text">
               <p className="font-medium text-text mb-1">Find people to follow</p>
               <p className="text-text-secondary mb-2">
                 You&apos;re not following anyone yet. Use the{" "}
@@ -267,26 +259,24 @@ function ClientShell() {
             supabase={supabase}
             currentUserId={user?.id ?? null}
           />
-          <PostForm
-            supabase={supabase}
-            onPosted={loadPosts}
-            defaultMarkNsfw={Boolean(profile?.default_posts_nsfw)}
-          />
         </>
       ) : user ? (
         <p className="text-text-muted text-sm">Loading profile…</p>
       ) : (
-        <div className="w-full max-w-xl flex flex-col items-center gap-4 text-center">
-          <p className="text-text-secondary text-sm">
-            Sign in to see posts from you and people you follow, and to post. Home is your personal feed only.
-          </p>
-          <p className="text-text-muted text-sm">
-            Browse everything that&apos;s public on{" "}
-            <Link href="/explore" className="text-link font-medium hover:text-link-hover hover:underline transition-colors">
-              Explore
-            </Link>
-            .
-          </p>
+        <div className="flex w-full max-w-4xl flex-col items-center gap-6">
+          <AuthForm supabase={supabase} onAuthChange={refreshSession} />
+          <div className="flex w-full flex-col items-center gap-4 text-center">
+            <p className="text-text-secondary text-sm">
+              Sign in to see posts from you and people you follow, and to post. Home is your personal feed only.
+            </p>
+            <p className="text-text-muted text-sm">
+              Browse everything that&apos;s public on{" "}
+              <Link href="/explore" className="text-link font-medium hover:text-link-hover hover:underline transition-colors">
+                Explore
+              </Link>
+              .
+            </p>
+          </div>
         </div>
       )}
     </>

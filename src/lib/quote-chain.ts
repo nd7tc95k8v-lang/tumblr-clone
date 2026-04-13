@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { coercePostImageRows } from "@/lib/post-images";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import { coercePostTags } from "@/lib/tags";
-import type { PostAuthorEmbed, QuotedPostNode } from "@/types/post";
+import type { PostAuthorEmbed, PostImageRow, QuotedPostNode } from "@/types/post";
 
 /** Fields needed to walk `reblog_of` and render nested quotes (no engagement fields). */
 export type ChainPostRow = {
@@ -11,6 +12,7 @@ export type ChainPostRow = {
   user_id: string;
   image_url?: string | null;
   image_storage_path?: string | null;
+  post_images?: PostImageRow[] | null;
   reblog_of?: string | null;
   reblog_commentary?: string | null;
   original_post_id: string;
@@ -19,9 +21,10 @@ export type ChainPostRow = {
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
 };
 
-type ChainQueryRow = Omit<ChainPostRow, "original_post_id" | "tags"> & {
+type ChainQueryRow = Omit<ChainPostRow, "original_post_id" | "tags" | "post_images"> & {
   original_post_id?: string | null;
   tags?: unknown;
+  post_images?: unknown;
 };
 
 export const POST_CHAIN_SELECT = `
@@ -36,6 +39,7 @@ export const POST_CHAIN_SELECT = `
   original_post_id,
   is_nsfw,
   tags,
+  post_images ( id, post_id, storage_path, position, created_at ),
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
 
@@ -48,6 +52,7 @@ function normalizeChainQueryRow(row: ChainQueryRow): ChainPostRow {
     original_post_id: threadRootPostId(row),
     is_nsfw: Boolean(row.is_nsfw),
     image_storage_path: path,
+    post_images: coercePostImageRows(row.post_images),
     tags: coercePostTags(row.tags),
   };
 }
@@ -133,6 +138,7 @@ function embedParentNode(
     user_id: row.user_id,
     image_url: row.image_url,
     image_storage_path: row.image_storage_path ?? null,
+    post_images: row.post_images ?? null,
     reblog_of: row.reblog_of ?? null,
     reblog_commentary: row.reblog_commentary ?? null,
     is_nsfw: row.is_nsfw,

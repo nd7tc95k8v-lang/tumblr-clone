@@ -10,7 +10,7 @@ import {
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileUsernameLink from "./ProfileUsernameLink";
-import PostMediaImage from "./PostMediaImage";
+import PostMediaGallery from "./PostMediaGallery";
 
 function QuotedFallbackBody({
   node,
@@ -27,13 +27,7 @@ function QuotedFallbackBody({
       {node.content ? (
         <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-text">{node.content}</p>
       ) : null}
-      <PostMediaImage
-        supabase={supabase}
-        storagePath={node.image_storage_path}
-        legacyUrl={node.image_url}
-        alt="Post image"
-        className="mt-2 rounded-card max-h-[400px] w-full object-cover"
-      />
+      <PostMediaGallery supabase={supabase} post={node} variant="quoted" wrapperClassName="mt-2" />
     </>
   );
 }
@@ -124,13 +118,7 @@ export default function QuotedPostNest({
               {node.content ? (
                 <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-text">{node.content}</p>
               ) : null}
-              <PostMediaImage
-                supabase={supabase}
-                storagePath={node.image_storage_path}
-                legacyUrl={node.image_url}
-                alt="Post image"
-                className="mt-2 rounded-card max-h-[400px] w-full object-cover"
-              />
+              <PostMediaGallery supabase={supabase} post={node} variant="quoted" wrapperClassName="mt-2" />
             </>
           ) : (
             <>

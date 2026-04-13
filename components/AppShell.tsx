@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 import { APP_NAME } from "@/lib/constants";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
+import SidebarAccount from "./SidebarAccount";
 
 const linkBase =
   "block rounded-lg px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg";
@@ -18,48 +20,54 @@ type NavItem = {
   match: (pathname: string) => boolean;
 };
 
-function useProfileHref(supabase: ReturnType<typeof createBrowserSupabaseClient>) {
-  const [profileUsername, setProfileUsername] = useState<string | null>(null);
+function useSupabaseSidebarAuth(supabase: ReturnType<typeof createBrowserSupabaseClient>) {
+  const [user, setUser] = useState<User | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!supabase) {
+      setUser(null);
+      setUsername(null);
+      return;
+    }
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const u = session?.user ?? null;
+    setUser(u);
+    if (!u) {
+      setUsername(null);
+      return;
+    }
+    const { data } = await supabase.from("profiles").select("username").eq("id", u.id).maybeSingle();
+    const un = data?.username?.trim();
+    setUsername(un && un.length > 0 ? un : null);
+  }, [supabase]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     if (!supabase) return;
-    let cancelled = false;
-
-    const load = async () => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        if (!cancelled) setProfileUsername(null);
-        return;
-      }
-      const { data } = await supabase.from("profiles").select("username").eq("id", user.id).maybeSingle();
-      if (cancelled) return;
-      const u = data?.username?.trim();
-      setProfileUsername(u && u.length > 0 ? u : null);
-    };
-
-    void load();
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(() => {
-      void load();
+      void refresh();
     });
-    return () => {
-      cancelled = true;
-      subscription.unsubscribe();
-    };
-  }, [supabase]);
+    return () => subscription.unsubscribe();
+  }, [supabase, refresh]);
 
-  return profileUsername !== null
-    ? `/profile/${encodeURIComponent(normalizeUsername(profileUsername))}`
-    : "/";
+  const profileHref =
+    username !== null ? `/profile/${encodeURIComponent(normalizeUsername(username))}` : "/";
+
+  return { user, username, profileHref, refreshAuth: refresh };
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
-  const profileHref = useProfileHref(supabase);
+  const { user, username, profileHref, refreshAuth } = useSupabaseSidebarAuth(supabase);
 
   const items: NavItem[] = [
     { href: "/", label: "Home", match: (p) => p === "/" },
@@ -120,7 +128,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex flex-1 min-h-0">
         <aside
           id="app-sidebar"
-          className="hidden md:flex w-56 shrink-0 flex-col border-r border-border bg-bg p-4 min-h-screen"
+          className="hidden w-56 shrink-0 border-r border-border bg-bg p-4 md:flex md:min-h-screen md:flex-col"
           aria-label="Sidebar"
         >
           {brand}
@@ -129,7 +137,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               Add Supabase env vars to enable full navigation.
             </p>
           ) : null}
-          {sidebarNav}
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0">{sidebarNav}</div>
+            <div className="min-h-4 flex-1" aria-hidden />
+            {supabase && user ? (
+              <SidebarAccount supabase={supabase} username={username} onAuthChange={() => void refreshAuth()} />
+            ) : null}
+          </div>
         </aside>
 
         <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 bg-bg flex flex-col">

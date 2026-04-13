@@ -19,7 +19,7 @@ import {
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
 import ProfileUsernameLink from "./ProfileUsernameLink";
-import PostMediaImage from "./PostMediaImage";
+import PostMediaGallery from "./PostMediaGallery";
 import {
   normalizePostBodyForDedup,
   recordSuccessfulUserWrittenPost,
@@ -188,25 +188,18 @@ export default function PostCard({
           {quoteLayer && commentary ? (
             <p className="mt-2 whitespace-pre-wrap text-base leading-relaxed text-text">{commentary}</p>
           ) : null}
-          {quoteOuterMedia ? (
-            <PostMediaImage
+          {quoteOuterMedia && quoteOuterMedia.length > 0 ? (
+            <PostMediaGallery
               supabase={supabase}
-              storagePath={quoteOuterMedia.storagePath}
-              legacyUrl={quoteOuterMedia.legacyUrl}
-              alt="Post image"
-              className="mt-3 rounded-card max-h-[500px] w-full object-cover"
+              normalizedImages={quoteOuterMedia}
+              variant="feed"
+              wrapperClassName="mt-3"
             />
           ) : null}
           {!isReblog ? (
             <>
               <p className="mb-2 mt-3 whitespace-pre-wrap text-base leading-relaxed text-text">{post.content}</p>
-              <PostMediaImage
-                supabase={supabase}
-                storagePath={post.image_storage_path}
-                legacyUrl={post.image_url}
-                alt="Post image"
-                className="mt-3 rounded-card max-h-[500px] w-full object-cover"
-              />
+              <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-3" />
             </>
           ) : null}
           {plainResolved?.kind === "flat" ? (
@@ -214,12 +207,11 @@ export default function PostCard({
               {plainResolved.leaf.content ? (
                 <p className="mb-2 mt-3 whitespace-pre-wrap text-base leading-relaxed text-text">{plainResolved.leaf.content}</p>
               ) : null}
-              <PostMediaImage
+              <PostMediaGallery
                 supabase={supabase}
-                storagePath={plainResolved.leaf.image_storage_path}
-                legacyUrl={plainResolved.leaf.image_url}
-                alt="Post image"
-                className="mt-3 rounded-card max-h-[500px] w-full object-cover"
+                post={plainResolved.leaf}
+                variant="feed"
+                wrapperClassName="mt-3"
               />
             </>
           ) : null}
@@ -247,12 +239,14 @@ export default function PostCard({
               {fallbackBody.content ? (
                 <p className="mb-2 mt-3 whitespace-pre-wrap text-base leading-relaxed text-text">{fallbackBody.content}</p>
               ) : null}
-              <PostMediaImage
+              <PostMediaGallery
                 supabase={supabase}
-                storagePath={fallbackBody.image_storage_path}
-                legacyUrl={fallbackBody.imageSrc}
-                alt="Post image"
-                className="mt-3 rounded-card max-h-[500px] w-full object-cover"
+                post={{
+                  image_url: fallbackBody.imageSrc,
+                  image_storage_path: fallbackBody.image_storage_path,
+                }}
+                variant="feed"
+                wrapperClassName="mt-3"
               />
               <p className="mt-2 text-meta text-text-muted">Quote chain could not be fully loaded.</p>
             </>

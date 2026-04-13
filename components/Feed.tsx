@@ -28,12 +28,12 @@ const Feed: React.FC<Props> = ({
 }) => {
   const [rebloggingId, setRebloggingId] = useState<string | null>(null);
   if (loading && posts.length === 0) {
-    return <p className="text-text-muted text-sm w-full max-w-xl mx-auto">Loading posts…</p>;
+    return <p className="mx-auto w-full max-w-4xl text-sm text-text-muted">Loading posts…</p>;
   }
 
   if (error) {
     return (
-      <div className="w-full max-w-xl mx-auto p-4 rounded-card border border-error/30 bg-error/10 text-text text-sm flex flex-col gap-2">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-2 rounded-card border border-error/30 bg-error/10 p-4 text-sm text-text">
         <p>{error}</p>
         <button
           type="button"
@@ -48,14 +48,14 @@ const Feed: React.FC<Props> = ({
 
   if (posts.length === 0) {
     return (
-      <p className="text-text-muted text-sm w-full max-w-xl mx-auto text-center">
+      <p className="text-text-muted text-sm w-full max-w-4xl mx-auto text-center">
         No posts yet. Be the first to post.
       </p>
     );
   }
 
   return (
-    <div className="flex flex-col gap-4 w-full max-w-xl mx-auto">
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-4">
       {posts.map((post) => (
         <PostCard
           key={post.id}
