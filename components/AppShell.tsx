@@ -17,9 +17,10 @@ const SPLASH_SLOGANS = [
   "Where creators shape the conversation.",
 ];
 
-/** Mobile splash: fade starts ~900ms after paint; overlay unmounts ~1300ms (~400ms opacity transition). */
-const SPLASH_FADE_START_MS = 900;
-const SPLASH_TOTAL_MS = 1300;
+/** Mobile splash: slogan motion ~420ms; fade ~1950ms; unmount ~2550ms (~600ms opacity transition). */
+const SPLASH_SLOGAN_REVEAL_MS = 420;
+const SPLASH_FADE_START_MS = 1950;
+const SPLASH_TOTAL_MS = 2550;
 const SPLASH_FADE_DURATION_MS = SPLASH_TOTAL_MS - SPLASH_FADE_START_MS;
 
 const linkBase =
@@ -89,25 +90,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const [splashMounted, setSplashMounted] = useState(true);
   const [splashFading, setSplashFading] = useState(false);
+  const [sloganVisible, setSloganVisible] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let sloganRevealTimer: number | null = null;
     let fadeStartTimer: number | null = null;
     let unmountTimer: number | null = null;
 
     if (reduceMotion.matches) {
-      unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_FADE_START_MS);
+      setSloganVisible(true);
+      fadeStartTimer = window.setTimeout(() => setSplashFading(true), SPLASH_FADE_START_MS);
+      unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_TOTAL_MS);
       return () => {
+        if (fadeStartTimer !== null) window.clearTimeout(fadeStartTimer);
         if (unmountTimer !== null) window.clearTimeout(unmountTimer);
       };
     }
 
+    sloganRevealTimer = window.setTimeout(() => setSloganVisible(true), SPLASH_SLOGAN_REVEAL_MS);
     fadeStartTimer = window.setTimeout(() => setSplashFading(true), SPLASH_FADE_START_MS);
     unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_TOTAL_MS);
 
     return () => {
+      if (sloganRevealTimer !== null) window.clearTimeout(sloganRevealTimer);
       if (fadeStartTimer !== null) window.clearTimeout(fadeStartTimer);
       if (unmountTimer !== null) window.clearTimeout(unmountTimer);
     };
@@ -186,7 +194,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-full flex flex-col bg-bg">
       {splashMounted ? (
         <div
-          className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-bg px-6 md:hidden pointer-events-none transition-opacity ease-out ${
+          className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-2 bg-bg px-6 md:hidden pointer-events-none transition-opacity ease-out ${
             splashFading ? "opacity-0" : "opacity-100"
           }`}
           style={{ transitionDuration: `${SPLASH_FADE_DURATION_MS}ms` }}
@@ -195,11 +203,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <img
             src="/logo/qrtz-logo.svg"
             alt=""
-            className="h-14 w-auto shrink-0 md:h-16"
-            width={196}
-            height={56}
+            className="h-28 w-auto shrink-0"
+            width={392}
+            height={112}
           />
-          <p className="max-w-[min(320px,100vw-3rem)] text-center text-base font-medium leading-snug text-text-muted md:text-lg">
+          <p
+            className={`max-w-[min(320px,100vw-3rem)] text-center text-base font-medium leading-snug text-text-muted transition-[transform,opacity] duration-500 ease-out motion-reduce:transition-none ${
+              sloganVisible ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"
+            } motion-reduce:translate-y-0 motion-reduce:opacity-100`}
+          >
             {slogan}
           </p>
         </div>
