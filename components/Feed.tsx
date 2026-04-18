@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { NsfwFeedMode } from "@/lib/nsfw-feed-preference";
 import type { FeedPost } from "@/types/post";
 import PostCard from "./PostCard";
 
@@ -23,6 +24,8 @@ type Props = {
   onPostDeleted?: () => void | Promise<void>;
   /** Called after the viewer successfully updates their own post (e.g. tags). */
   onPostUpdated?: () => void | Promise<void>;
+  /** Home / Explore / Search: controls NSFW tap-to-view; omit for profile/tag (defaults to warn). */
+  nsfwFeedMode?: NsfwFeedMode;
 };
 
 const FEED_SKELETON_KEYS = ["feed-sk-0", "feed-sk-1", "feed-sk-2"] as const;
@@ -30,9 +33,12 @@ const FEED_SKELETON_KEYS = ["feed-sk-0", "feed-sk-1", "feed-sk-2"] as const;
 /** Outer width + horizontal padding; keeps the column centered and stable on desktop. */
 const FEED_OUTER = "mx-auto w-full max-w-3xl px-3 sm:px-6";
 
+/** Vertical rhythm between cards — slightly tighter on phone, unchanged from `md` up. */
+const FEED_STACK_GAP = "gap-2 max-md:gap-1.5";
+
 /** Soft rail behind posts; child selectors only soften PostCard edges (no PostCard edits). */
 const FEED_STREAM =
-  "rounded-2xl bg-bg-secondary/20 p-1 sm:p-1.5 dark:bg-bg-secondary/30 [&>article]:border-border/40 [&>article]:shadow-none";
+  "rounded-2xl bg-bg-secondary/20 p-0.5 sm:p-1.5 dark:bg-bg-secondary/30 [&>article]:border-border/40 [&>article]:shadow-none";
 
 const Feed: React.FC<Props> = ({
   posts,
@@ -48,20 +54,21 @@ const Feed: React.FC<Props> = ({
   postSearchHighlightTags,
   onPostDeleted,
   onPostUpdated,
+  nsfwFeedMode,
 }) => {
   const [rebloggingId, setRebloggingId] = useState<string | null>(null);
   if (loading && posts.length === 0) {
     return (
       <div
-        className={`${FEED_OUTER} flex flex-col gap-2`}
+        className={`${FEED_OUTER} flex flex-col ${FEED_STACK_GAP}`}
         role="status"
         aria-busy="true"
         aria-label="Loading posts"
       >
-        <div className={`flex flex-col gap-2 ${FEED_STREAM}`}>
+        <div className={`flex flex-col ${FEED_STACK_GAP} ${FEED_STREAM}`}>
         {FEED_SKELETON_KEYS.map((key) => (
-          <article key={key} className="qrtz-card animate-pulse">
-            <div className="flex gap-2.5 sm:gap-3">
+          <article key={key} className="qrtz-card max-md:p-3 animate-pulse">
+            <div className="flex gap-2 sm:gap-3">
               <div
                 className="mt-px h-10 w-10 shrink-0 rounded-full bg-bg-secondary ring-1 ring-border/40"
                 aria-hidden
@@ -114,7 +121,7 @@ const Feed: React.FC<Props> = ({
 
   return (
     <div className={FEED_OUTER}>
-      <div className={`flex flex-col gap-2 ${FEED_STREAM}`}>
+      <div className={`flex flex-col ${FEED_STACK_GAP} ${FEED_STREAM}`}>
         {posts.map((post) => (
           <PostCard
             key={post.id}
@@ -134,6 +141,7 @@ const Feed: React.FC<Props> = ({
             }}
             onPostDeleted={onPostDeleted}
             onPostUpdated={onPostUpdated}
+            nsfwFeedMode={nsfwFeedMode}
           />
         ))}
       </div>

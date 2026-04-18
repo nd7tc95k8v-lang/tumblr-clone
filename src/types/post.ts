@@ -72,6 +72,8 @@ export type FeedPost = {
   like_count: number;
   /** Descendant reblogs for the chain root (`original_post_id`). */
   reblog_count: number;
+  /** Flat note comments on the thread root (`post_note_comments`). */
+  note_comment_count: number;
   /** True when the viewer liked the thread root (`post_ids_liked_by_auth_user` on root ids). */
   liked_by_me: boolean;
   /** Normalized tag strings (lowercase, trimmed). */

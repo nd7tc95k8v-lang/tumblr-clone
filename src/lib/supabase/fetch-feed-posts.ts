@@ -59,7 +59,7 @@ export const POST_ORIGINAL_SELECT = `
 
 type FeedRow = Omit<
   FeedPost,
-  "original_post" | "quoted_post" | "like_count" | "reblog_count" | "liked_by_me"
+  "original_post" | "quoted_post" | "like_count" | "reblog_count" | "note_comment_count" | "liked_by_me"
 >;
 
 /** Raw row from PostgREST (`original_post_id` may be null on legacy rows). */
@@ -153,6 +153,7 @@ export async function hydrateFeedPostsFromQueryRows(
     quoted_post: buildQuotedPostChain(row, chainLookup),
     like_count: 0,
     reblog_count: 0,
+    note_comment_count: 0,
     liked_by_me: false,
   }));
 
@@ -220,6 +221,11 @@ export type FetchFeedPostsOptions = {
    * Profile “hide reblogs”: keep only original rows (`reblog_of` IS NULL). Quote reblogs are still reblogs and are excluded.
    */
   excludeReblogs?: boolean;
+  /**
+   * When true, omit rows with `posts.is_nsfw` at query time (viewer preference `hide`).
+   * Opt-in only (home / explore / search); omit on profile and tag surfaces.
+   */
+  excludeNsfwFromFeed?: boolean;
 };
 
 /**
@@ -245,6 +251,10 @@ export async function fetchFeedPosts(
     query = query.contains("tags", [tagFilter]);
   }
 
+  if (options.excludeNsfwFromFeed) {
+    query = query.eq("is_nsfw", false);
+  }
+
   const { data: rows, error } = await query;
   if (error) {
     return { data: null, error };
@@ -261,6 +271,7 @@ export async function fetchFeedPostsForFollowedTagsOverlap(
   supabase: SupabaseClient,
   normalizedTags: string[],
   viewerUserId: string | null,
+  opts?: { excludeNsfwFromFeed?: boolean },
 ): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
   if (normalizedTags.length === 0) {
     return { data: [], error: null };
@@ -268,6 +279,10 @@ export async function fetchFeedPostsForFollowedTagsOverlap(
 
   let query = supabase.from("posts").select(POST_FEED_BASE_SELECT).order("created_at", { ascending: false });
   query = query.overlaps("tags", normalizedTags);
+
+  if (opts?.excludeNsfwFromFeed) {
+    query = query.eq("is_nsfw", false);
+  }
 
   const { data: rows, error } = await query;
   if (error) {

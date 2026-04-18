@@ -10,6 +10,11 @@ import {
   mergeFollowingFeedSources,
 } from "@/lib/supabase/fetch-feed-posts";
 import { annotatePostsForHomeFollowingFeed } from "@/lib/home-following-feed";
+import {
+  DEFAULT_NSFW_FEED_MODE,
+  excludeNsfwPostsFromFeedQuery,
+  resolveNsfwFeedModeFromProfileRow,
+} from "@/lib/nsfw-feed-preference";
 import { fetchFollowedTagStringsForUser } from "@/lib/supabase/followed-tags";
 import { profileNeedsOnboarding } from "@/lib/username";
 import type { FeedPost, PostAuthorEmbed } from "@/types/post";
@@ -20,18 +25,12 @@ import { useReblogAction } from "./useReblogAction";
 /** Must match `ComposeClient` — sessionStorage handoff for optimistic feed merge after compose. */
 const PENDING_FEED_POST_STORAGE_KEY = "qrtz:pendingFeedPost";
 
-type ProfileRow = { id: string; username: string | null; default_posts_nsfw?: boolean };
-
-function dedupePostsById(posts: FeedPost[]): FeedPost[] {
-  const seen = new Set<string>();
-  const out: FeedPost[] = [];
-  for (const p of posts) {
-    if (seen.has(p.id)) continue;
-    seen.add(p.id);
-    out.push(p);
-  }
-  return out;
-}
+type ProfileRow = {
+  id: string;
+  username: string | null;
+  default_posts_nsfw?: boolean;
+  nsfw_feed_mode?: string | null;
+};
 
 function prependWithoutDuplicate(newPost: FeedPost, existing: FeedPost[]): FeedPost[] {
   const rest = existing.filter((p) => p.id !== newPost.id);
@@ -66,10 +65,25 @@ function mergePendingDedupe(incoming: FeedPost[], prev: FeedPost[]): FeedPost[] 
   return out;
 }
 
+/**
+ * Home following feed should not show reblogs from non-followed users: keep posts/reblogs from you and
+ * people you follow, plus originals discovered via followed tags (see {@link FeedPost.homeFollowingMatchedTag}).
+ */
+function filterHomeFollowingFeedByAllowedAuthors(
+  posts: FeedPost[],
+  viewerUserId: string,
+  followedUserIds: string[],
+): FeedPost[] {
+  const allowedAuthorIds = new Set<string>([viewerUserId, ...followedUserIds]);
+  return posts.filter((p) => {
+    if (allowedAuthorIds.has(p.user_id)) return true;
+    if (p.reblog_of != null) return false;
+    return Boolean(p.homeFollowingMatchedTag);
+  });
+}
+
 const BACKGROUND_FEED_POLL_MS = 25_000;
 const SCROLL_TOP_THRESHOLD_PX = 12;
-
-type HomeFeedTab = "following" | "explore";
 
 function ClientShell() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -83,7 +97,6 @@ function ClientShell() {
   const [profileLoadFailed, setProfileLoadFailed] = useState(false);
   /** Count of accounts this user follows (excluding self). Used for empty-follow hint. */
   const [followingOthersCount, setFollowingOthersCount] = useState<number | null>(null);
-  const [homeFeedTab, setHomeFeedTab] = useState<HomeFeedTab>("following");
   const [pendingNewPosts, setPendingNewPosts] = useState<FeedPost[]>([]);
 
   const postsRef = useRef<FeedPost[]>([]);
@@ -113,7 +126,7 @@ function ClientShell() {
     try {
       const { data: profileRow, error } = await supabase
         .from("profiles")
-        .select("id, username, default_posts_nsfw")
+        .select("id, username, default_posts_nsfw, nsfw_feed_mode")
         .eq("id", user.id)
         .maybeSingle();
       if (error) {
@@ -131,7 +144,7 @@ function ClientShell() {
           setProfileLoadFailed(true);
           return;
         }
-        data = { id: user.id, username: null, default_posts_nsfw: false };
+        data = { id: user.id, username: null, default_posts_nsfw: false, nsfw_feed_mode: "warn" };
       }
       setProfile(data);
     } finally {
@@ -144,131 +157,122 @@ function ClientShell() {
     setPostsLoading(true);
     setPostsError(null);
     try {
+      const excludeNsfwFromFeed =
+        Boolean(user) && Boolean(profile) && excludeNsfwPostsFromFeedQuery(resolveNsfwFeedModeFromProfileRow(profile));
+
+      if (!user) {
+        setFollowingOthersCount(null);
+        setPosts([]);
+        setPendingNewPosts([]);
+        return;
+      }
+
       let filterUserIds: string[] | undefined;
       let followedTagStrings: string[] = [];
-      if (user && homeFeedTab === "following") {
-        const { data: followRows, error: followError } = await supabase
-          .from("follows")
-          .select("following_id")
-          .eq("follower_id", user.id);
-        if (followError) {
-          setFollowingOthersCount(null);
-          setPostsError(followError.message);
-          return;
-        }
-        const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
-        setFollowingOthersCount(followedIds.length);
-        filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
-
-        const { tags, error: tagsError } = await fetchFollowedTagStringsForUser(supabase, user.id);
-        if (tagsError) {
-          setPostsError(tagsError.message);
-          return;
-        }
-        followedTagStrings = tags;
-      } else {
-        if (!user) setFollowingOthersCount(null);
+      const { data: followRows, error: followError } = await supabase
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", user.id);
+      if (followError) {
+        setFollowingOthersCount(null);
+        setPostsError(followError.message);
+        return;
       }
+      const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
+      setFollowingOthersCount(followedIds.length);
+      filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
 
-      if (user && homeFeedTab === "following") {
-        const { data: userFeed, error: userFeedError } = await fetchFeedPosts(supabase, {
-          filterUserIds,
-          viewerUserId: user.id,
-        });
-        if (userFeedError) {
-          setPostsError(userFeedError.message);
-          return;
-        }
-        let merged = userFeed ?? [];
-        if (followedTagStrings.length > 0) {
-          const { data: tagFeed, error: tagFeedError } = await fetchFeedPostsForFollowedTagsOverlap(
-            supabase,
-            followedTagStrings,
-            user.id,
-          );
-          if (tagFeedError) {
-            setPostsError(tagFeedError.message);
-            return;
-          }
-          merged = mergeFollowingFeedSources(merged, tagFeed ?? []);
-        }
-        setPosts(annotatePostsForHomeFollowingFeed(merged, followedTagStrings));
-      } else {
-        const { data, error } = await fetchFeedPosts(supabase, {
-          filterUserIds: undefined,
-          viewerUserId: user?.id ?? null,
-        });
-        if (error) {
-          setPostsError(error.message);
-          return;
-        }
-        setPosts(dedupePostsById(data ?? []));
+      const { tags, error: tagsError } = await fetchFollowedTagStringsForUser(supabase, user.id);
+      if (tagsError) {
+        setPostsError(tagsError.message);
+        return;
       }
+      followedTagStrings = tags;
+
+      const { data: userFeed, error: userFeedError } = await fetchFeedPosts(supabase, {
+        filterUserIds,
+        viewerUserId: user.id,
+        excludeNsfwFromFeed,
+      });
+      if (userFeedError) {
+        setPostsError(userFeedError.message);
+        return;
+      }
+      let merged = userFeed ?? [];
+      if (followedTagStrings.length > 0) {
+        const { data: tagFeed, error: tagFeedError } = await fetchFeedPostsForFollowedTagsOverlap(
+          supabase,
+          followedTagStrings,
+          user.id,
+          { excludeNsfwFromFeed },
+        );
+        if (tagFeedError) {
+          setPostsError(tagFeedError.message);
+          return;
+        }
+        merged = mergeFollowingFeedSources(merged, tagFeed ?? []);
+      }
+      const annotated = annotatePostsForHomeFollowingFeed(merged, followedTagStrings);
+      setPosts(filterHomeFollowingFeedByAllowedAuthors(annotated, user.id, followedIds));
       setPendingNewPosts([]);
     } finally {
       setPostsLoading(false);
     }
-  }, [supabase, user, homeFeedTab]);
+  }, [supabase, user, profile]);
 
   /** Same query as `loadPosts`, for background polling only — does not touch loading UI or replace the feed. */
   const fetchFeedPostsSnapshot = useCallback(async (): Promise<{ posts: FeedPost[]; error: string | null }> => {
     if (!supabase) return { posts: [], error: null };
+    if (!user) return { posts: [], error: null };
     try {
+      const excludeNsfwFromFeed =
+        Boolean(user) && Boolean(profile) && excludeNsfwPostsFromFeedQuery(resolveNsfwFeedModeFromProfileRow(profile));
+
       let filterUserIds: string[] | undefined;
       let followedTagStrings: string[] = [];
-      if (user && homeFeedTab === "following") {
-        const { data: followRows, error: followError } = await supabase
-          .from("follows")
-          .select("following_id")
-          .eq("follower_id", user.id);
-        if (followError) {
-          return { posts: [], error: followError.message };
-        }
-        const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
-        filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
-
-        const { tags, error: tagsError } = await fetchFollowedTagStringsForUser(supabase, user.id);
-        if (tagsError) {
-          return { posts: [], error: tagsError.message };
-        }
-        followedTagStrings = tags;
+      const { data: followRows, error: followError } = await supabase
+        .from("follows")
+        .select("following_id")
+        .eq("follower_id", user.id);
+      if (followError) {
+        return { posts: [], error: followError.message };
       }
+      const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
+      filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
 
-      if (user && homeFeedTab === "following") {
-        const { data: userFeed, error: userFeedError } = await fetchFeedPosts(supabase, {
-          filterUserIds,
-          viewerUserId: user.id,
-        });
-        if (userFeedError) {
-          return { posts: [], error: userFeedError.message };
-        }
-        let merged = userFeed ?? [];
-        if (followedTagStrings.length > 0) {
-          const { data: tagFeed, error: tagFeedError } = await fetchFeedPostsForFollowedTagsOverlap(
-            supabase,
-            followedTagStrings,
-            user.id,
-          );
-          if (tagFeedError) {
-            return { posts: [], error: tagFeedError.message };
-          }
-          merged = mergeFollowingFeedSources(merged, tagFeed ?? []);
-        }
-        return { posts: annotatePostsForHomeFollowingFeed(merged, followedTagStrings), error: null };
+      const { tags, error: tagsError } = await fetchFollowedTagStringsForUser(supabase, user.id);
+      if (tagsError) {
+        return { posts: [], error: tagsError.message };
       }
+      followedTagStrings = tags;
 
-      const { data, error } = await fetchFeedPosts(supabase, {
-        filterUserIds: undefined,
-        viewerUserId: user?.id ?? null,
+      const { data: userFeed, error: userFeedError } = await fetchFeedPosts(supabase, {
+        filterUserIds,
+        viewerUserId: user.id,
+        excludeNsfwFromFeed,
       });
-      if (error) {
-        return { posts: [], error: error.message };
+      if (userFeedError) {
+        return { posts: [], error: userFeedError.message };
       }
-      return { posts: dedupePostsById(data ?? []), error: null };
+      let merged = userFeed ?? [];
+      if (followedTagStrings.length > 0) {
+        const { data: tagFeed, error: tagFeedError } = await fetchFeedPostsForFollowedTagsOverlap(
+          supabase,
+          followedTagStrings,
+          user.id,
+          { excludeNsfwFromFeed },
+        );
+        if (tagFeedError) {
+          return { posts: [], error: tagFeedError.message };
+        }
+        merged = mergeFollowingFeedSources(merged, tagFeed ?? []);
+      }
+      const annotated = annotatePostsForHomeFollowingFeed(merged, followedTagStrings);
+      return { posts: filterHomeFollowingFeedByAllowedAuthors(annotated, user.id, followedIds), error: null };
     } catch (e) {
       return { posts: [], error: e instanceof Error ? e.message : "Unknown error" };
     }
-  }, [supabase, user, homeFeedTab]);
+  }, [supabase, user, profile]);
 
   const prependPostWithScrollPreserve = useCallback((post: FeedPost) => {
     docHeightBeforePendingRef.current = document.documentElement.scrollHeight;
@@ -315,12 +319,11 @@ function ClientShell() {
     void loadProfile();
   }, [loadProfile]);
 
-  useEffect(() => {
-    setPendingNewPosts([]);
-  }, [homeFeedTab]);
-
   const needsOnboarding = Boolean(user && profile && profileNeedsOnboarding(profile.username));
   const showFeed = Boolean(user && profile && !profileNeedsOnboarding(profile.username));
+  const homeFeedNsfwMode = profile ? resolveNsfwFeedModeFromProfileRow(profile) : DEFAULT_NSFW_FEED_MODE;
+  const excludeNsfwFromHomeFeed =
+    Boolean(user) && Boolean(profile) && excludeNsfwPostsFromFeedQuery(homeFeedNsfwMode);
 
   useEffect(() => {
     if (!supabase || !sessionReady) return;
@@ -346,7 +349,9 @@ function ClientShell() {
         sessionStorage.removeItem(PENDING_FEED_POST_STORAGE_KEY);
         const pending = JSON.parse(raw) as FeedPost;
         if (pending && typeof pending.id === "string" && pending.id.length > 0) {
-          prependPostWithScrollPreserve(pending);
+          if (!(excludeNsfwFromHomeFeed && pending.is_nsfw)) {
+            prependPostWithScrollPreserve(pending);
+          }
         }
       }
     } catch {
@@ -358,7 +363,16 @@ function ClientShell() {
     }
 
     void loadPosts();
-  }, [supabase, sessionReady, user, needsOnboarding, showFeed, loadPosts, prependPostWithScrollPreserve]);
+  }, [
+    supabase,
+    sessionReady,
+    user,
+    needsOnboarding,
+    showFeed,
+    loadPosts,
+    prependPostWithScrollPreserve,
+    excludeNsfwFromHomeFeed,
+  ]);
 
   const runBackgroundFeedPoll = useCallback(async () => {
     if (!showFeed || needsOnboarding || postsLoading) return;
@@ -389,7 +403,7 @@ function ClientShell() {
       void runBackgroundFeedPoll();
     }, BACKGROUND_FEED_POLL_MS);
     return () => window.clearInterval(id);
-  }, [showFeed, needsOnboarding, homeFeedTab, runBackgroundFeedPoll]);
+  }, [showFeed, needsOnboarding, runBackgroundFeedPoll]);
 
   useLayoutEffect(() => {
     if (!pendingScrollAdjustRef.current) return;
@@ -438,64 +452,15 @@ function ClientShell() {
         />
       ) : user && showFeed ? (
         <>
-          <div className="flex w-full max-w-4xl flex-col items-stretch gap-3">
-            <div
-              className="flex rounded-card border border-border bg-bg-secondary p-0.5"
-              role="tablist"
-              aria-label="Home feed"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={homeFeedTab === "following"}
-                id="home-tab-following"
-                className={`flex-1 rounded-btn px-3 py-2 text-sm font-medium transition-colors ${
-                  homeFeedTab === "following"
-                    ? "qrtz-tab-selected text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
-                onClick={() => setHomeFeedTab("following")}
-              >
-                Following
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={homeFeedTab === "explore"}
-                id="home-tab-explore"
-                className={`flex-1 rounded-btn px-3 py-2 text-sm font-medium transition-colors ${
-                  homeFeedTab === "explore"
-                    ? "qrtz-tab-selected text-text"
-                    : "text-text-muted hover:text-text"
-                }`}
-                onClick={() => setHomeFeedTab("explore")}
-              >
-                Explore
-              </button>
-            </div>
-            <p className="text-text-secondary text-sm text-center">
-              {homeFeedTab === "following"
-                ? "Posts from people and tags you follow."
-                : "Public posts from everyone, newest first — same as the Explore page."}
-            </p>
-          </div>
-          {homeFeedTab === "following" && followingOthersCount === 0 ? (
+          {followingOthersCount === 0 ? (
             <div className="w-full max-w-4xl rounded-card border border-accent-aqua/35 bg-surface-blue px-4 py-3 text-sm text-text">
               <p className="font-medium text-text mb-1">Find people to follow</p>
               <p className="text-text-secondary mb-2">
-                You&apos;re not following anyone yet. Use the{" "}
-                <button
-                  type="button"
-                  onClick={() => setHomeFeedTab("explore")}
-                  className="text-link font-medium hover:text-link-hover hover:underline transition-colors"
-                >
-                  Explore
-                </button>{" "}
-                tab above (or the full{" "}
+                You&apos;re not following anyone yet. Open{" "}
                 <Link href="/explore" className="text-link font-medium hover:text-link-hover hover:underline transition-colors">
                   Explore
                 </Link>{" "}
-                page), then follow people you like.
+                from the sidebar (or go to the full Explore page), then follow people you like.
               </p>
             </div>
           ) : null}
@@ -528,6 +493,7 @@ function ClientShell() {
             currentUserId={user?.id ?? null}
             onPostDeleted={loadPosts}
             onPostUpdated={loadPosts}
+            nsfwFeedMode={homeFeedNsfwMode}
           />
         </>
       ) : user ? (

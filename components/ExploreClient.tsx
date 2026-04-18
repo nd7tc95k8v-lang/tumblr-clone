@@ -1,10 +1,16 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import {
+  DEFAULT_NSFW_FEED_MODE,
+  excludeNsfwPostsFromFeedQuery,
+  resolveNsfwFeedModeFromProfileRow,
+  type NsfwFeedMode,
+} from "@/lib/nsfw-feed-preference";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { reblogInsertFields } from "@/lib/reblog";
 import type { FeedPost } from "@/types/post";
@@ -20,53 +26,100 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
   const { runProtectedAction } = useActionGuard();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
-  const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(initialLoadError);
+  const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
+  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setPosts(initialPosts);
-  }, [initialPosts]);
-
-  useEffect(() => {
-    setError(initialLoadError);
-  }, [initialLoadError]);
+  const bootstrapSeq = useRef(0);
 
   useEffect(() => {
     if (!supabase) return;
-    void supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-    });
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase]);
 
-  const loadPosts = useCallback(async () => {
-    if (!supabase) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const { data, error: fetchError } = await fetchFeedPosts(supabase, {
-        viewerUserId: user?.id ?? null,
-      });
-      if (fetchError) {
-        setError(fetchError.message);
+    const syncFeedFromSession = async () => {
+      const seq = ++bootstrapSeq.current;
+      setLoading(true);
+      setError(null);
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (seq !== bootstrapSeq.current) return;
+
+      const u = session?.user ?? null;
+      setUser(u);
+
+      if (!u) {
+        setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+        setPosts(initialPosts);
+        setError(initialLoadError);
+        setLoading(false);
         return;
       }
-      setPosts(data ?? []);
-    } finally {
-      setLoading(false);
-    }
-  }, [supabase, user?.id]);
 
-  useEffect(() => {
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("nsfw_feed_mode")
+        .eq("id", u.id)
+        .maybeSingle();
+      if (seq !== bootstrapSeq.current) return;
+      if (profErr) {
+        console.error(profErr);
+      }
+
+      const mode = resolveNsfwFeedModeFromProfileRow(prof);
+      setNsfwFeedMode(mode);
+
+      const { data, error: fetchError } = await fetchFeedPosts(supabase, {
+        viewerUserId: u.id,
+        excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
+      });
+      if (seq !== bootstrapSeq.current) return;
+
+      if (fetchError) {
+        setError(fetchError.message);
+        setPosts([]);
+      } else {
+        setError(null);
+        setPosts(data ?? []);
+      }
+      setLoading(false);
+    };
+
+    void syncFeedFromSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      void syncFeedFromSession();
+    });
+
+    return () => {
+      bootstrapSeq.current += 1;
+      subscription.unsubscribe();
+    };
+  }, [supabase, initialPosts, initialLoadError]);
+
+  const refreshSignedInFeed = useCallback(async () => {
     if (!supabase) return;
-    void loadPosts();
-  }, [supabase, user?.id, loadPosts]);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const u = session?.user ?? null;
+    if (!u) {
+      setPosts(initialPosts);
+      setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+      return;
+    }
+    const { data: prof } = await supabase.from("profiles").select("nsfw_feed_mode").eq("id", u.id).maybeSingle();
+    const mode = resolveNsfwFeedModeFromProfileRow(prof);
+    setNsfwFeedMode(mode);
+    const { data, error: fetchError } = await fetchFeedPosts(supabase, {
+      viewerUserId: u.id,
+      excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
+    });
+    if (!fetchError) setPosts(data ?? []);
+  }, [supabase, initialPosts]);
 
   const handleReblog = useCallback(
     async (original: FeedPost, commentary?: string | null) => {
@@ -91,11 +144,11 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
           return;
         }
         succeeded = true;
-        await loadPosts();
+        await refreshSignedInFeed();
       });
       return succeeded;
     },
-    [supabase, loadPosts, runProtectedAction],
+    [supabase, runProtectedAction, refreshSignedInFeed],
   );
 
   if (!supabase) {
@@ -119,13 +172,53 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
         posts={posts}
         loading={loading}
         error={error}
-        onRetry={loadPosts}
+        onRetry={() => {
+          void (async () => {
+            if (!supabase) return;
+            setLoading(true);
+            setError(null);
+            try {
+              const {
+                data: { session },
+              } = await supabase.auth.getSession();
+              const u = session?.user ?? null;
+              setUser(u);
+              if (!u) {
+                setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+                setPosts(initialPosts);
+                setError(initialLoadError);
+                return;
+              }
+              const { data: prof } = await supabase
+                .from("profiles")
+                .select("nsfw_feed_mode")
+                .eq("id", u.id)
+                .maybeSingle();
+              const mode = resolveNsfwFeedModeFromProfileRow(prof);
+              setNsfwFeedMode(mode);
+              const { data, error: fetchError } = await fetchFeedPosts(supabase, {
+                viewerUserId: u.id,
+                excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
+              });
+              if (fetchError) {
+                setError(fetchError.message);
+                setPosts([]);
+              } else {
+                setError(null);
+                setPosts(data ?? []);
+              }
+            } finally {
+              setLoading(false);
+            }
+          })();
+        }}
         onReblog={handleReblog}
         showReblog={Boolean(user)}
         supabase={supabase}
         currentUserId={user?.id ?? null}
-        onPostDeleted={loadPosts}
-        onPostUpdated={loadPosts}
+        onPostDeleted={() => void refreshSignedInFeed()}
+        onPostUpdated={() => void refreshSignedInFeed()}
+        nsfwFeedMode={nsfwFeedMode}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">

@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
-import { APP_NAME } from "@/lib/constants";
+import { APP_NAME, NOTIFICATION_INBOX_MARKED_READ_EVENT } from "@/lib/constants";
+import { fetchNotificationUnreadCount } from "@/lib/supabase/notifications-inbox";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 import SidebarAccount from "./SidebarAccount";
@@ -32,7 +33,67 @@ type NavItem = {
   href: string;
   label: string;
   match: (pathname: string) => boolean;
+  /** Unread count badge (notifications only in this pass). */
+  badge?: number;
 };
+
+const mobileTabIconSvgPropsBase = {
+  xmlns: "http://www.w3.org/2000/svg",
+  viewBox: "0 0 24 24",
+  fill: "none" as const,
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+  "aria-hidden": true as const,
+};
+
+function MobileTabIcon({ label, active }: { label: string; active: boolean }) {
+  const iconClassName = `size-[1.35rem] shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none ${
+    active ? "scale-[1.06] -translate-y-px opacity-100" : "scale-100 opacity-[0.88] motion-reduce:opacity-100"
+  }`;
+  const mobileTabIconSvgProps = { ...mobileTabIconSvgPropsBase, className: iconClassName };
+
+  switch (label) {
+    case "Home":
+      return (
+        <svg {...mobileTabIconSvgProps}>
+          <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+      );
+    case "Explore":
+      return (
+        <svg {...mobileTabIconSvgProps}>
+          <circle cx="12" cy="12" r="10" />
+          <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+        </svg>
+      );
+    case "Profile":
+      return (
+        <svg {...mobileTabIconSvgProps}>
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      );
+    case "Settings":
+      return (
+        <svg {...mobileTabIconSvgProps}>
+          <line x1="4" x2="4" y1="21" y2="14" />
+          <line x1="4" x2="4" y1="10" y2="3" />
+          <line x1="12" x2="12" y1="21" y2="12" />
+          <line x1="12" x2="12" y1="8" y2="3" />
+          <line x1="20" x2="20" y1="21" y2="16" />
+          <line x1="20" x2="20" y1="12" y2="3" />
+          <circle cx="4" cy="12" r="2" />
+          <circle cx="12" cy="16" r="2" />
+          <circle cx="20" cy="8" r="2" />
+        </svg>
+      );
+    default:
+      return null;
+  }
+}
 
 function useSupabaseSidebarAuth(supabase: ReturnType<typeof createBrowserSupabaseClient>) {
   const [user, setUser] = useState<User | null>(null);
@@ -82,6 +143,65 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const { user, username, profileHref, refreshAuth } = useSupabaseSidebarAuth(supabase);
+  const [unreadNotifCount, setUnreadNotifCount] = useState(0);
+
+  const refreshNotificationsUnread = useCallback(async () => {
+    if (!supabase || !user) {
+      setUnreadNotifCount(0);
+      return;
+    }
+    const { count, error } = await fetchNotificationUnreadCount(supabase);
+    if (error) {
+      setUnreadNotifCount(0);
+      return;
+    }
+    setUnreadNotifCount(count);
+  }, [supabase, user]);
+
+  /** Initial load + auth/session changes. */
+  useEffect(() => {
+    void refreshNotificationsUnread();
+  }, [refreshNotificationsUnread]);
+
+  /** Route changes (skip entering `/notifications` — inbox updates the badge via custom event after mark-read). */
+  const pathnameRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (pathnameRef.current === null) {
+      pathnameRef.current = pathname;
+      return;
+    }
+    if (pathnameRef.current === pathname) return;
+    pathnameRef.current = pathname;
+    if (pathname.startsWith("/notifications")) return;
+    void refreshNotificationsUnread();
+  }, [pathname, refreshNotificationsUnread]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onMarkedRead = () => {
+      void refreshNotificationsUnread();
+    };
+    window.addEventListener(NOTIFICATION_INBOX_MARKED_READ_EVENT, onMarkedRead);
+    return () => window.removeEventListener(NOTIFICATION_INBOX_MARKED_READ_EVENT, onMarkedRead);
+  }, [refreshNotificationsUnread]);
+
+  /** Tab focus / bfcache restore — keeps badge plausible without polling. */
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshNotificationsUnread();
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void refreshNotificationsUnread();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [refreshNotificationsUnread]);
 
   const [slogan] = useState(() => {
     const i = Math.floor(Math.random() * SPLASH_SLOGANS.length);
@@ -121,33 +241,53 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const sidebarItems: NavItem[] = [
-    { href: "/", label: "Home", match: (p) => p === "/" },
-    { href: "/explore", label: "Explore", match: (p) => p === "/explore" },
-    { href: "/search", label: "Search", match: (p) => p === "/search" },
-    {
-      href: profileHref,
-      label: "Profile",
-      match: (p) => p.startsWith("/profile/"),
-    },
-    { href: "/settings", label: "Settings", match: (p) => p === "/settings" },
-  ];
+  const sidebarItems: NavItem[] = useMemo(
+    () => [
+      { href: "/", label: "Home", match: (p: string) => p === "/" },
+      {
+        href: "/notifications",
+        label: "Notifications",
+        match: (p) => p === "/notifications" || p.startsWith("/notifications/"),
+        badge: unreadNotifCount > 0 ? unreadNotifCount : undefined,
+      },
+      { href: "/explore", label: "Explore", match: (p) => p === "/explore" },
+      { href: "/search", label: "Search", match: (p) => p === "/search" },
+      {
+        href: profileHref,
+        label: "Profile",
+        match: (p) => p.startsWith("/profile/"),
+      },
+      { href: "/settings", label: "Settings", match: (p) => p === "/settings" },
+    ],
+    [profileHref, unreadNotifCount],
+  );
 
   /** Bottom bar stays 5 slots (grid-cols-5); Search is desktop sidebar + direct URL. */
   const mobileItems: NavItem[] = [
     sidebarItems[0],
-    sidebarItems[1],
-    sidebarItems[3],
+    sidebarItems[2],
     sidebarItems[4],
+    sidebarItems[5],
   ];
 
   const createActive = pathname === "/compose";
 
   const sidebarNav = (
     <nav className="flex flex-col gap-0.5" aria-label="Main">
-      {sidebarItems.map(({ href, label, match }) => (
-        <Link key={label} href={href} className={match(pathname) ? `${linkBase} ${linkActive}` : linkBase}>
-          {label}
+      {sidebarItems.map(({ href, label, match, badge }) => (
+        <Link
+          key={label}
+          href={href}
+          className={match(pathname) ? `${linkBase} ${linkActive}` : linkBase}
+        >
+          <span className="flex items-center justify-between gap-2">
+            <span>{label}</span>
+            {badge != null && badge > 0 ? (
+              <span className="tabular-nums rounded-full bg-accent-aqua/90 px-1.5 text-[10px] font-bold leading-none text-black">
+                {badge > 99 ? "99+" : badge}
+              </span>
+            ) : null}
+          </span>
         </Link>
       ))}
       <Link
@@ -183,12 +323,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const bottomBarFocus =
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus/60";
   const mobileTabBase =
-    "relative flex min-h-[3.25rem] min-w-0 touch-manipulation flex-col items-center justify-center gap-1 px-0.5 pb-2 pt-1 text-center text-[11px] font-medium leading-none tracking-wide transition-[color,background-color] duration-150 ease-out";
-  const mobileTabInactive = "text-text-muted active:bg-bg-secondary/55";
+    "relative flex min-h-[3.5rem] min-w-0 touch-manipulation flex-col items-center justify-center gap-0.5 px-0.5 pb-2.5 pt-1.5 text-center text-[10px] font-medium leading-none tracking-wide transition-[color,background-color,transform,opacity] duration-150 ease-out";
+  const mobileTabInactive =
+    "rounded-lg text-text-muted active:scale-[0.97] active:bg-bg-secondary/55 motion-reduce:active:scale-100";
   const mobileTabActive =
-    "font-semibold text-text after:pointer-events-none after:absolute after:bottom-1.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-text/80";
+    "rounded-lg font-semibold text-text after:pointer-events-none after:absolute after:bottom-2.5 after:left-1/2 after:h-[3px] after:w-8 after:-translate-x-1/2 after:rounded-full after:bg-text after:shadow-[0_1px_2px_rgba(0,0,0,0.12)]";
   const mobilePostTabActive =
-    "font-semibold text-text after:pointer-events-none after:absolute after:bottom-1.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-accent-aqua/90";
+    "font-semibold text-text after:pointer-events-none after:absolute after:bottom-3 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-accent-aqua/90";
 
   return (
     <div className="min-h-full flex flex-col bg-bg">
@@ -216,43 +357,76 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </p>
         </div>
       ) : null}
-      <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center gap-2 border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
+      <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center gap-1.5 border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
         <div className="min-w-0 flex-1">
           <Link
             href="/"
-            className="flex min-h-[2.25rem] min-w-0 max-w-full items-center gap-2 text-text transition-opacity hover:opacity-90 active:opacity-80"
+            className="flex min-h-11 min-w-0 max-w-full items-center gap-1.5 py-0.5 text-text transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.99] active:opacity-80 motion-reduce:active:scale-100"
             aria-label={APP_NAME}
           >
             <img
               src="/logo/qrtz-logo.svg"
               alt=""
-              className="h-6 w-auto shrink-0"
+              className="h-[1.375rem] w-auto shrink-0"
               width={112}
               height={24}
             />
-            <span className="min-w-0 truncate text-base font-semibold tracking-tight">{APP_NAME}</span>
+            <span className="min-w-0 truncate text-[0.9375rem] font-semibold leading-tight tracking-tight">{APP_NAME}</span>
           </Link>
         </div>
-        <Link
-          href="/search"
-          aria-label="Search"
-          className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg active:bg-bg-secondary/80"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="size-5"
-            aria-hidden
+        <div className="flex shrink-0 items-center gap-0.5">
+          {supabase && user ? (
+            <Link
+              href="/notifications"
+              aria-label={
+                unreadNotifCount > 0
+                  ? `Notifications, ${unreadNotifCount > 99 ? "99+" : unreadNotifCount} unread`
+                  : "Notifications"
+              }
+              className="relative inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-[color,background-color,transform,opacity] duration-150 ease-out hover:bg-bg-secondary hover:text-text active:scale-[0.97] active:bg-bg-secondary/55 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus/60"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="size-[1.35rem] shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none"
+                aria-hidden
+              >
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+              </svg>
+              {unreadNotifCount > 0 ? (
+                <span className="absolute right-1 top-1 flex min-h-[0.875rem] min-w-[0.875rem] items-center justify-center rounded-full bg-accent-aqua px-[3px] text-[9px] font-bold leading-none text-black ring-2 ring-bg/90">
+                  {unreadNotifCount > 9 ? "9+" : unreadNotifCount}
+                </span>
+              ) : null}
+            </Link>
+          ) : null}
+          <Link
+            href="/search"
+            aria-label="Search"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-[color,background-color,transform,opacity] duration-150 ease-out hover:bg-bg-secondary hover:text-text active:scale-[0.97] active:bg-bg-secondary/55 motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus/60"
           >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-        </Link>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="size-[1.35rem] shrink-0 transition-[transform,opacity] duration-150 ease-out motion-reduce:transition-none"
+              aria-hidden
+            >
+              <circle cx="11" cy="11" r="8" />
+              <path d="m21 21-4.3-4.3" />
+            </svg>
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-1 min-h-0">
@@ -276,7 +450,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-bg pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-bg pb-[calc(4.375rem+env(safe-area-inset-bottom,0px))] md:pb-0">
           <div className="flex-1 min-h-0">{children}</div>
           <footer className="shrink-0 border-t border-border px-4 py-4 text-center text-meta text-text-muted">
             © 2026 {APP_NAME}
@@ -285,49 +459,66 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <nav
-        className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 items-stretch border-t border-border/40 bg-bg/90 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-10px_40px_-18px_rgba(0,0,0,0.08)] backdrop-blur-md md:hidden"
+        className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 items-stretch border-t border-border/40 bg-bg/90 pb-[calc(0.375rem+env(safe-area-inset-bottom,0px))] shadow-[0_-10px_40px_-18px_rgba(0,0,0,0.08)] backdrop-blur-md md:hidden"
         aria-label="Mobile navigation"
       >
-        {mobileItems.slice(0, 2).map(({ href, label, match }) => (
-          <Link
-            key={label}
-            href={href}
-            className={`${mobileTabBase} ${bottomBarFocus} ${match(pathname) ? mobileTabActive : mobileTabInactive}`}
-          >
-            <span className="max-w-full truncate px-0.5">{label}</span>
-          </Link>
-        ))}
+        {mobileItems.slice(0, 2).map(({ href, label, match }) => {
+          const active = match(pathname);
+          return (
+            <Link
+              key={label}
+              href={href}
+              aria-label={label}
+              aria-current={active ? "page" : undefined}
+              className={`${mobileTabBase} ${bottomBarFocus} ${active ? mobileTabActive : mobileTabInactive}`}
+            >
+              <MobileTabIcon label={label} active={active} />
+              {active ? (
+                <span className="max-w-full truncate px-0.5 text-[9px] font-semibold leading-tight tracking-wide text-text">
+                  {label}
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
         <Link
           href="/compose"
+          aria-label="Create post"
+          aria-current={createActive ? "page" : undefined}
           className={`${mobileTabBase} ${bottomBarFocus} ${
             createActive ? mobilePostTabActive : "text-text-secondary active:bg-bg-secondary/55"
           }`}
         >
           <span
-            className={`qrtz-btn-primary mb-px flex size-9 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold leading-none shadow-sm ring-1 ring-white/20 transition-[transform,box-shadow] duration-150 ease-out ${
-              createActive ? "shadow-md ring-white/25" : ""
+            className={`qrtz-btn-primary relative z-[1] flex size-9 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold leading-none transition-[transform,box-shadow] duration-150 ease-out motion-reduce:translate-y-0 motion-reduce:shadow-sm motion-reduce:ring-1 motion-reduce:ring-white/25 ${
+              createActive
+                ? "-translate-y-1.5 shadow-[0_3px_10px_rgba(0,0,0,0.16),0_8px_22px_-5px_rgba(0,0,0,0.26)] ring-2 ring-white/45"
+                : "-translate-y-1 shadow-[0_2px_8px_rgba(0,0,0,0.12),0_5px_16px_-5px_rgba(0,0,0,0.2)] ring-1 ring-white/28"
             }`}
             aria-hidden
           >
             +
           </span>
-          <span
-            className={`hidden max-w-full truncate px-0.5 text-[11px] font-semibold leading-none tracking-wide ${
-              createActive ? "text-accent-aqua" : "text-text-muted"
-            }`}
-          >
-            Post
-          </span>
         </Link>
-        {mobileItems.slice(2).map(({ href, label, match }) => (
-          <Link
-            key={label}
-            href={href}
-            className={`${mobileTabBase} ${bottomBarFocus} ${match(pathname) ? mobileTabActive : mobileTabInactive}`}
-          >
-            <span className="max-w-full truncate px-0.5">{label}</span>
-          </Link>
-        ))}
+        {mobileItems.slice(2).map(({ href, label, match }) => {
+          const active = match(pathname);
+          return (
+            <Link
+              key={label}
+              href={href}
+              aria-label={label}
+              aria-current={active ? "page" : undefined}
+              className={`${mobileTabBase} ${bottomBarFocus} ${active ? mobileTabActive : mobileTabInactive}`}
+            >
+              <MobileTabIcon label={label} active={active} />
+              {active ? (
+                <span className="max-w-full truncate px-0.5 text-[9px] font-semibold leading-tight tracking-wide text-text">
+                  {label}
+                </span>
+              ) : null}
+            </Link>
+          );
+        })}
       </nav>
     </div>
   );

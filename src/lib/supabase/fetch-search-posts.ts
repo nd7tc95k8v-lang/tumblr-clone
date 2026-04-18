@@ -31,6 +31,8 @@ export type FetchSearchPostsOptions = {
   viewerUserId?: string | null;
   /** When set, restrict hits to this author's posts (combined with text/tags filters when present). */
   authorUserId?: string | null;
+  /** When true, omit `is_nsfw` rows (viewer feed preference `hide`). */
+  excludeNsfwFromFeed?: boolean;
 };
 
 /**
@@ -63,6 +65,10 @@ export async function fetchSearchPosts(
     query = query.overlaps("tags", tags);
   }
 
+  if (options.excludeNsfwFromFeed) {
+    query = query.eq("is_nsfw", false);
+  }
+
   const { data: rows, error } = await query;
   if (error) {
     return { data: null, error };
@@ -76,6 +82,7 @@ export type FetchSearchPostsWithTwoTokenFallbackOptions = {
   rawQ: string;
   tagsAny?: string[];
   viewerUserId?: string | null;
+  excludeNsfwFromFeed?: boolean;
 };
 
 /** Dedupe by post id, then newest-first (same ordering intent as the main post search query). */
@@ -109,6 +116,7 @@ export async function fetchSearchPostsWithTwoTokenFallback(
     contentSubstring: postSearchText.length > 0 ? postSearchText : null,
     tagsAny: options.tagsAny,
     viewerUserId: options.viewerUserId ?? null,
+    excludeNsfwFromFeed: options.excludeNsfwFromFeed,
   };
 
   const first = await fetchSearchPosts(supabase, firstOpts);
@@ -148,6 +156,7 @@ export async function fetchSearchPostsWithTwoTokenFallback(
         tagsAny: options.tagsAny,
         viewerUserId: options.viewerUserId ?? null,
         authorUserId: resolved.id,
+        excludeNsfwFromFeed: options.excludeNsfwFromFeed,
       });
       if (!scoped.error && (scoped.data?.length ?? 0) > 0) {
         combined = mergeSearchPostsNewestFirstUnique(combined, scoped.data ?? []);

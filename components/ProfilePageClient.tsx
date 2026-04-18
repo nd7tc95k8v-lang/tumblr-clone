@@ -7,6 +7,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { fetchProfileFollowCounts } from "@/lib/supabase/follow-counts";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
+import { QRTZ_POST_ELEMENT_ID_PREFIX } from "@/lib/post-anchor";
 import { normalizeUsername } from "@/lib/username";
 import type { ProfileFollowStats } from "@/types/follows";
 import type { ProfilePublic } from "@/types/profile";
@@ -102,6 +103,21 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
     if (!supabase) return;
     void loadPosts();
   }, [supabase, user?.id, loadPosts]);
+
+  /** If URL has `#qrtz-post-…`, scroll to that card after the stream has painted (notifications / shared links). */
+  useEffect(() => {
+    if (typeof window === "undefined" || postsLoading) return;
+    const raw = window.location.hash?.replace(/^#/, "") ?? "";
+    if (!raw.startsWith(QRTZ_POST_ELEMENT_ID_PREFIX)) return;
+    const el = document.getElementById(raw);
+    if (!el) return;
+    const raf = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      });
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [postsLoading, posts]);
 
   const handleReblog = useReblogAction(supabase, { onSuccess: loadPosts });
 

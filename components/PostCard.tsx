@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ALLOWED_IMAGE_MIME_TYPES, validateImageFile } from "@/lib/image-upload-validation";
 import { coercePostImageRows } from "@/lib/post-images";
+import { postElementDomId } from "@/lib/post-anchor";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
 import { coercePostTags, displayTagsForPost, parseCommaSeparatedTags } from "@/lib/tags";
@@ -31,6 +32,7 @@ import { InlineErrorBanner } from "./InlineErrorBanner";
 import QuotedPostNest from "./QuotedPostNest";
 import PostNotesModal from "./PostNotesModal";
 import ReblogModal from "./ReblogModal";
+import { DEFAULT_NSFW_FEED_MODE, type NsfwFeedMode } from "@/lib/nsfw-feed-preference";
 import { useActionGuard } from "./ActionGuardProvider";
 import { usePostLikeToggle } from "./usePostLikeToggle";
 
@@ -112,6 +114,61 @@ const STAT_COUNT_CLASS =
 const REBLOG_ACTION_CLASS =
   "inline-flex min-h-[1.75rem] min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-meta font-medium text-text-secondary transition-[color,background-color,transform,box-shadow] duration-200 ease-out hover:text-link hover:bg-bg-secondary/60 active:scale-[0.97] active:bg-bg-secondary/75 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50";
 
+/** Slightly larger hit + tighter icon/text rhythm on phone (labels stay readable). */
+const ACTION_HIT_MOBILE = "max-md:min-h-[2rem] max-md:gap-1 max-md:px-2 max-md:py-1";
+
+/** Smaller meta text on phone without affecting `md+`. */
+const ACTION_TEXT_MOBILE = "max-md:text-[0.6875rem] max-md:font-normal max-md:leading-snug";
+
+/** Calmer secondary actions (notes / reblog / quote / owner menu trigger). */
+const REBLOG_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE} max-md:text-text-secondary/90`;
+
+/** Like control: same hit/text tuning; color still from liked / muted state. */
+const LIKE_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE}`;
+
+/** Reblog count row (non-button): only typography + gap. */
+const REBLOG_STAT_ROW_COMPACT = `${ACTION_TEXT_MOBILE} max-md:gap-1`;
+
+/**
+ * Quote-style commentary that stays visible above the gate when the row is NSFW and this text is
+ * the card author's own layer (not the nested quoted body). See plain `kind: "quoted"` collapse path.
+ */
+function nsfwUngatedVisibleCommentary(post: FeedPost): string | null {
+  if (post.is_nsfw !== true) return null;
+  if (hasQuoteReblogLayer(post)) {
+    const c = post.reblog_commentary?.trim();
+    if (c) return c;
+  }
+  const resolved = resolvePlainReblogDisplay(post);
+  if (resolved?.kind === "quoted") {
+    const c = resolved.node.reblog_commentary?.trim();
+    if (c) return c;
+  }
+  return null;
+}
+
+function NsfwFeedContentWarning({ onReveal }: { onReveal: () => void }) {
+  return (
+    <div
+      className="mt-2.5 rounded-lg border border-border/70 bg-bg-secondary/75 px-3 py-3 shadow-sm ring-1 ring-black/[0.03] dark:ring-white/[0.04]"
+      role="region"
+      aria-label="Mature content hidden"
+    >
+      <p className="font-heading text-sm font-semibold tracking-tight text-text">Mature content</p>
+      <p className="mt-1 text-[0.8125rem] leading-snug text-text-secondary">
+        This post may contain mature or sensitive content.
+      </p>
+      <button
+        type="button"
+        onClick={onReveal}
+        className="mt-2.5 inline-flex min-h-[1.75rem] items-center justify-center rounded-md border border-border/80 bg-bg-secondary px-3 py-1.5 text-sm font-medium text-text transition-[color,background-color,transform] duration-200 ease-out hover:border-accent-purple/45 hover:bg-surface-blue/40 hover:text-link focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 active:scale-[0.98]"
+      >
+        View post
+      </button>
+    </div>
+  );
+}
+
 type Props = {
   post: FeedPost;
   rebloggingId: string | null;
@@ -125,6 +182,11 @@ type Props = {
   onPostDeleted?: () => void | Promise<void>;
   /** Called after the viewer successfully updates tags on their post (e.g. refetch feed). */
   onPostUpdated?: () => void | Promise<void>;
+  /**
+   * Home / Explore / Search only: `warn` uses tap-to-view; `show` never gates; `hide` should not appear (filtered server-side).
+   * Omit on profile/tag feeds → defaults to `warn`.
+   */
+  nsfwFeedMode?: NsfwFeedMode;
 };
 
 const TAG_CHIP_BASE =
@@ -133,6 +195,14 @@ const TAG_CHIP_DEFAULT =
   "border-border bg-bg-secondary text-text-secondary hover:border-accent-purple/45 hover:text-link";
 const TAG_CHIP_HIGHLIGHT =
   "border-accent-purple/55 bg-accent-purple/15 text-text hover:border-accent-purple/70 hover:text-link";
+
+/** Narrow screens: slightly flatter chips, calmer fills, aligned with compact meta/actions. */
+const TAG_CHIP_MOBILE_SHELL =
+  "max-md:inline-flex max-md:min-h-[1.75rem] max-md:items-center max-md:px-1.5 max-md:py-px max-md:text-[0.6875rem] max-md:font-normal max-md:leading-snug";
+const TAG_CHIP_DEFAULT_MOBILE_SOFT =
+  "max-md:border-border/55 max-md:bg-bg-secondary/65 max-md:text-text-secondary";
+const TAG_CHIP_HIGHLIGHT_MOBILE_SOFT =
+  "max-md:border-accent-purple/45 max-md:bg-accent-purple/11 max-md:text-text";
 
 const MAX_POST_IMAGES = 10;
 const ACCEPT_IMAGE_ATTR = ALLOWED_IMAGE_MIME_TYPES.join(",");
@@ -292,6 +362,7 @@ export default function PostCard({
   searchHighlightTags,
   onPostDeleted,
   onPostUpdated,
+  nsfwFeedMode,
 }: Props) {
   const [reblogModalPost, setReblogModalPost] = useState<FeedPost | null>(null);
   const [reblogModalBusy, setReblogModalBusy] = useState(false);
@@ -313,8 +384,12 @@ export default function PostCard({
   const [mediaNewFiles, setMediaNewFiles] = useState<File[]>([]);
   const [mediaDragActive, setMediaDragActive] = useState(false);
   const [reblogCount, setReblogCount] = useState(() => Math.max(0, post.reblog_count));
+  /** Local offset vs `post.note_comment_count` so the Notes badge updates without a feed refetch. */
+  const [noteCommentAdjust, setNoteCommentAdjust] = useState(0);
   const [quoteChainExpanded, setQuoteChainExpanded] = useState(false);
   const [notesModalOpen, setNotesModalOpen] = useState(false);
+  /** Per-card, session-only: reveal gated feed body/media after viewer opts in. */
+  const [nsfwRevealed, setNsfwRevealed] = useState(false);
 
   const { liked, likeCount, likeBusy, likeError, dismissLikeError, toggleLike } = usePostLikeToggle({
     supabase,
@@ -329,8 +404,13 @@ export default function PostCard({
   }, [post.id, post.reblog_count]);
 
   useEffect(() => {
+    setNoteCommentAdjust(0);
+  }, [post.id, post.note_comment_count]);
+
+  useEffect(() => {
     setQuoteChainExpanded(false);
-  }, [post.id]);
+    setNsfwRevealed(false);
+  }, [post.id, nsfwFeedMode]);
   const header = postCardHeaderProfile(post);
   const { primary, primaryRaw, primaryAvatarUrl } = header;
   const isReblog = Boolean(post.reblog_of?.trim());
@@ -346,6 +426,13 @@ export default function PostCard({
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
   const plainReblogBy = plainReblogAttributionProfile(post);
   const plainReblogVia = plainReblogViaProfile(post);
+
+  const effectiveNsfwFeedMode = nsfwFeedMode ?? DEFAULT_NSFW_FEED_MODE;
+  const nsfwPresentationGate = post.is_nsfw === true && effectiveNsfwFeedMode === "warn";
+  const ungatedCommentary = nsfwPresentationGate ? nsfwUngatedVisibleCommentary(post) : null;
+  const nsfwFeedBodyHidden = nsfwPresentationGate && !nsfwRevealed;
+  /** Feed `show` mode only: subtle context label (no gate, no query change). */
+  const showNsfwUnGatedBadge = post.is_nsfw === true && effectiveNsfwFeedMode === "show";
 
   const isOwner = Boolean(currentUserId && currentUserId === post.user_id);
   const hasReblogParent = Boolean(post.reblog_of?.trim());
@@ -744,21 +831,26 @@ export default function PostCard({
   } as const;
 
   const postTime = formatRelativePostTime(post.created_at);
-  const notesTriggerTotal = Math.max(0, likeCount) + Math.max(0, reblogCount);
+  const effectiveNoteCommentCount = Math.max(0, post.note_comment_count + noteCommentAdjust);
+  const handleThreadNoteCountDelta = useCallback((delta: number) => {
+    setNoteCommentAdjust((prev) => prev + delta);
+  }, []);
+  const notesTriggerTotal =
+    Math.max(0, likeCount) + Math.max(0, reblogCount) + effectiveNoteCommentCount;
 
   return (
-    <article className="qrtz-card">
-      <div className="flex gap-2.5 sm:gap-3">
+    <article id={postElementDomId(post.id)} className="qrtz-card max-md:p-3">
+      <div className="flex gap-2 sm:gap-3">
         <ProfileAvatar url={primaryAvatarUrl} label={primary} size="md" className="mt-px" />
         <div className="min-w-0 flex-1">
-          <p className="font-heading text-base font-semibold leading-snug tracking-tight text-text">
+          <p className="font-heading text-base font-semibold leading-snug max-md:leading-tight tracking-tight text-text">
             <ProfileUsernameLink usernameRaw={primaryRaw} className="font-semibold text-inherit">
               {primary}
             </ProfileUsernameLink>
           </p>
           {plainReblogBy ? (
-            <p className="mt-0.5 text-[0.8125rem] leading-snug text-text-secondary">
-              <span className="font-normal text-text-muted">Reblogged by </span>
+            <p className="mt-0.5 max-md:mt-1 text-[0.8125rem] max-md:text-[0.75rem] leading-snug max-md:leading-normal text-text-secondary">
+              <span className="font-normal text-text-muted max-md:text-text-muted/90">Reblogged by </span>
               <ProfileUsernameLink
                 usernameRaw={plainReblogBy.primaryRaw}
                 className="font-normal text-text-secondary hover:text-link"
@@ -768,8 +860,12 @@ export default function PostCard({
             </p>
           ) : null}
           {plainReblogVia ? (
-            <p className="mt-0.5 text-[0.8125rem] leading-snug text-text-secondary">
-              <span className="font-normal text-text-muted">via </span>
+            <p
+              className={`text-[0.8125rem] max-md:text-[0.75rem] leading-snug max-md:leading-normal text-text-secondary ${
+                plainReblogBy ? "mt-0.5 max-md:mt-0.5" : "mt-0.5 max-md:mt-1"
+              }`}
+            >
+              <span className="font-normal text-text-muted max-md:text-text-muted/90">via </span>
               <ProfileUsernameLink
                 usernameRaw={plainReblogVia.primaryRaw}
                 className="font-normal text-text-secondary hover:text-link"
@@ -779,7 +875,7 @@ export default function PostCard({
             </p>
           ) : null}
           {post.homeFollowingMatchedTag ? (
-            <p className="mt-1.5 text-meta text-text-muted">
+            <p className="mt-1.5 max-md:mt-2 text-meta max-md:text-[0.6875rem] max-md:leading-snug text-text-muted max-md:text-text-muted/95">
               From tag you follow:{" "}
               <Link
                 href={`/tag/${encodeURIComponent(post.homeFollowingMatchedTag)}`}
@@ -789,93 +885,106 @@ export default function PostCard({
               </Link>
             </p>
           ) : null}
-          {quoteLayer && commentary ? (
+          {ungatedCommentary ? (
+            <div className={COMMENTARY_ADDED_LAYER_CLASS}>
+              <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">{ungatedCommentary}</p>
+            </div>
+          ) : quoteLayer && commentary ? (
             <div className={COMMENTARY_ADDED_LAYER_CLASS}>
               <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">{commentary}</p>
             </div>
           ) : null}
-          {quoteOuterMedia && quoteOuterMedia.length > 0 ? (
-            <PostMediaGallery
-              supabase={supabase}
-              normalizedImages={quoteOuterMedia}
-              variant="feed"
-              wrapperClassName="mt-2.5"
-            />
-          ) : null}
-          {!isReblog ? (
+          {nsfwFeedBodyHidden ? (
+            <NsfwFeedContentWarning onReveal={() => setNsfwRevealed(true)} />
+          ) : (
             <>
-              <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{post.content}</p>
-              <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-2.5" />
-            </>
-          ) : null}
-          {plainResolved?.kind === "flat" ? (
-            <>
-              {plainResolved.leaf.content ? (
-                <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{plainResolved.leaf.content}</p>
+              {quoteOuterMedia && quoteOuterMedia.length > 0 ? (
+                <PostMediaGallery
+                  supabase={supabase}
+                  normalizedImages={quoteOuterMedia}
+                  variant="feed"
+                  wrapperClassName="mt-2.5"
+                />
               ) : null}
-              <PostMediaGallery
-                supabase={supabase}
-                post={plainResolved.leaf}
-                variant="feed"
-                wrapperClassName="mt-2.5"
-              />
-            </>
-          ) : null}
-          {plainResolved?.kind === "quoted" ? (
-            <>
-              {plainResolved.node.reblog_commentary?.trim() ? (
-                <div className={COMMENTARY_ADDED_LAYER_CLASS}>
-                  <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">
-                    {plainResolved.node.reblog_commentary.trim()}
-                  </p>
-                </div>
+              {!isReblog ? (
+                <>
+                  <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{post.content}</p>
+                  <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-2.5" />
+                </>
               ) : null}
-              {plainResolved.node.quoted_post ? (
-                <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                  <QuotedPostNest
-                    node={plainResolved.node.quoted_post}
-                    depth={0}
+              {plainResolved?.kind === "flat" ? (
+                <>
+                  {plainResolved.leaf.content ? (
+                    <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{plainResolved.leaf.content}</p>
+                  ) : null}
+                  <PostMediaGallery
                     supabase={supabase}
-                    {...quoteNestExpandProps}
+                    post={plainResolved.leaf}
+                    variant="feed"
+                    wrapperClassName="mt-2.5"
                   />
-                </div>
-              ) : (
-                <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                  <QuotedPostNest node={plainResolved.node} depth={0} supabase={supabase} {...quoteNestExpandProps} />
-                </div>
-              )}
-            </>
-          ) : null}
-          {showFlatReblogFallback ? (
-            <>
-              {fallbackBody.content ? (
-                <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{fallbackBody.content}</p>
+                </>
               ) : null}
-              <PostMediaGallery
-                supabase={supabase}
-                post={{
-                  image_url: fallbackBody.imageSrc,
-                  image_storage_path: fallbackBody.image_storage_path,
-                }}
-                variant="feed"
-                wrapperClassName="mt-2.5"
-              />
-              <p className="mt-1.5 text-meta text-text-secondary">Quote chain could not be fully loaded.</p>
+              {plainResolved?.kind === "quoted" ? (
+                <>
+                  {plainResolved.node.reblog_commentary?.trim() &&
+                  !(ungatedCommentary && plainResolved.node.reblog_commentary.trim() === ungatedCommentary) ? (
+                    <div className={COMMENTARY_ADDED_LAYER_CLASS}>
+                      <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">
+                        {plainResolved.node.reblog_commentary.trim()}
+                      </p>
+                    </div>
+                  ) : null}
+                  {plainResolved.node.quoted_post ? (
+                    <div className={QUOTED_BLOCK_FRAME_CLASS}>
+                      <QuotedPostNest
+                        node={plainResolved.node.quoted_post}
+                        depth={0}
+                        supabase={supabase}
+                        {...quoteNestExpandProps}
+                      />
+                    </div>
+                  ) : (
+                    <div className={QUOTED_BLOCK_FRAME_CLASS}>
+                      <QuotedPostNest node={plainResolved.node} depth={0} supabase={supabase} {...quoteNestExpandProps} />
+                    </div>
+                  )}
+                </>
+              ) : null}
+              {showFlatReblogFallback ? (
+                <>
+                  {fallbackBody.content ? (
+                    <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{fallbackBody.content}</p>
+                  ) : null}
+                  <PostMediaGallery
+                    supabase={supabase}
+                    post={{
+                      image_url: fallbackBody.imageSrc,
+                      image_storage_path: fallbackBody.image_storage_path,
+                    }}
+                    variant="feed"
+                    wrapperClassName="mt-2.5"
+                  />
+                  <p className="mt-1.5 text-meta text-text-secondary">Quote chain could not be fully loaded.</p>
+                </>
+              ) : null}
+              {showNestedQuote && post.quoted_post ? (
+                <div className={QUOTED_BLOCK_FRAME_CLASS}>
+                  <QuotedPostNest node={post.quoted_post} depth={0} supabase={supabase} {...quoteNestExpandProps} />
+                </div>
+              ) : null}
             </>
-          ) : null}
-          {showNestedQuote && post.quoted_post ? (
-            <div className={QUOTED_BLOCK_FRAME_CLASS}>
-              <QuotedPostNest node={post.quoted_post} depth={0} supabase={supabase} {...quoteNestExpandProps} />
-            </div>
-          ) : null}
+          )}
           {tags.length > 0 ? (
-            <ul className="mt-2.5 flex list-none flex-wrap gap-1.5 p-0">
+            <ul className="mt-2.5 max-md:mt-2 flex list-none flex-wrap gap-1.5 max-md:gap-1 p-0">
               {tags.map((t) => (
                 <li key={t}>
                   <Link
                     href={`/tag/${encodeURIComponent(t)}`}
-                    className={`${TAG_CHIP_BASE} ${
-                      highlightSet?.has(t) ? TAG_CHIP_HIGHLIGHT : TAG_CHIP_DEFAULT
+                    className={`${TAG_CHIP_BASE} ${TAG_CHIP_MOBILE_SHELL} ${
+                      highlightSet?.has(t)
+                        ? `${TAG_CHIP_HIGHLIGHT} ${TAG_CHIP_HIGHLIGHT_MOBILE_SOFT}`
+                        : `${TAG_CHIP_DEFAULT} ${TAG_CHIP_DEFAULT_MOBILE_SOFT}`
                     }`}
                   >
                     #{t}
@@ -894,22 +1003,31 @@ export default function PostCard({
             onDismiss={() => setDeleteError(null)}
             className="mt-2.5"
           />
-          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-x-2.5">
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 max-md:gap-x-1.5 max-md:gap-y-1 sm:mt-3 sm:gap-x-2.5">
               <time
                 dateTime={post.created_at}
                 title={postTime.full}
                 aria-label={postTime.full}
-                className="max-w-[11rem] shrink-0 truncate text-left text-meta font-medium tabular-nums tracking-tight text-text-secondary"
+                className="max-w-[11rem] max-md:max-w-[9.25rem] shrink-0 truncate text-left text-meta max-md:text-[0.6875rem] font-medium tabular-nums tracking-tight text-text-secondary max-md:tracking-normal"
               >
                 {postTime.label}
               </time>
-              <span className="mx-0.5 h-3 w-px shrink-0 bg-border/50" aria-hidden />
-              <div className="flex min-h-[1.5rem] flex-wrap items-center gap-x-3 gap-y-0.5">
+              {showNsfwUnGatedBadge ? (
+                <span
+                  className="shrink-0 rounded-full border border-border/60 bg-bg-secondary/65 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-text-muted dark:border-border/50 dark:bg-bg-secondary/80"
+                  title="Mature content"
+                  aria-label="Mature content (NSFW)"
+                >
+                  NSFW
+                </span>
+              ) : null}
+              <span className="mx-0.5 max-md:mx-0 h-3 w-px shrink-0 bg-border/50" aria-hidden />
+              <div className="flex min-h-[1.5rem] flex-wrap items-center gap-x-2 gap-y-0.5 sm:gap-x-3">
                 <button
                   type="button"
                   disabled={!currentUserId || likeBusy}
                   onClick={() => void toggleLike()}
-                  className={`inline-flex min-h-[1.75rem] min-w-0 touch-manipulation select-none items-center justify-center gap-1.5 rounded-md px-1.5 py-0.5 text-meta font-medium tabular-nums transition-[color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 active:scale-95 disabled:pointer-events-none ${
+                  className={`inline-flex min-h-[1.75rem] min-w-0 touch-manipulation select-none items-center justify-center gap-1.5 rounded-md px-1.5 py-0.5 text-meta font-medium tabular-nums transition-[color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 active:scale-95 disabled:pointer-events-none ${LIKE_ACTION_ROW_COMPACT} ${
                     !currentUserId ? "cursor-not-allowed disabled:opacity-45" : "disabled:opacity-100"
                   } ${likeBusy ? "cursor-wait" : currentUserId ? "cursor-pointer" : ""} ${
                     liked ? "text-accent-pink" : "text-text-secondary hover:text-text"
@@ -932,7 +1050,7 @@ export default function PostCard({
                   <span className={STAT_COUNT_CLASS}>{Math.max(0, likeCount)}</span>
                 </button>
                 <span
-                  className="inline-flex items-center justify-center gap-1.5 px-0.5 py-0.5 text-meta font-medium tabular-nums text-text-secondary"
+                  className={`inline-flex items-center justify-center gap-1.5 px-0.5 py-0.5 text-meta font-medium tabular-nums text-text-secondary ${REBLOG_STAT_ROW_COMPACT}`}
                   title="Reblogs on this thread"
                 >
                   <span className="inline-flex h-4 w-4 items-center justify-center text-text-secondary" aria-hidden>
@@ -944,7 +1062,7 @@ export default function PostCard({
                   type="button"
                   disabled={!supabase}
                   onClick={() => setNotesModalOpen(true)}
-                  className={`${REBLOG_ACTION_CLASS} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
+                  className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
                   aria-haspopup="dialog"
                   aria-expanded={notesModalOpen}
                   aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
@@ -956,7 +1074,7 @@ export default function PostCard({
                 </button>
               </div>
               {showReblog ? (
-                <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 sm:ml-0.5">
+                <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 max-md:gap-x-1 sm:ml-0.5">
                   <button
                     type="button"
                     disabled={rebloggingId !== null}
@@ -964,7 +1082,7 @@ export default function PostCard({
                       setReblogModalError(null);
                       void onReblog(post, null);
                     }}
-                    className={`${REBLOG_ACTION_CLASS} touch-manipulation select-none ${
+                    className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none ${
                       rebloggingId === post.id
                         ? "cursor-wait bg-bg-secondary/50 opacity-90 ring-1 ring-border/45"
                         : "cursor-pointer"
@@ -984,7 +1102,7 @@ export default function PostCard({
                       setReblogModalError(null);
                       setReblogModalPost(post);
                     }}
-                    className={`${REBLOG_ACTION_CLASS} touch-manipulation select-none ${
+                    className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none ${
                       reblogModalBusy
                         ? "cursor-wait bg-bg-secondary/50 opacity-90 ring-1 ring-border/45"
                         : "cursor-pointer"
@@ -1006,13 +1124,16 @@ export default function PostCard({
                     className={`group relative ${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}
                   >
                     <summary
-                      className={`${REBLOG_ACTION_CLASS} list-none [&::-webkit-details-marker]:hidden ${
+                      className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} list-none [&::-webkit-details-marker]:hidden ${
                         ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
                       }`}
                       aria-label="Post options"
                       aria-busy={ownerActionBusy}
                     >
-                      <span aria-hidden className="text-lg leading-none tracking-tight">
+                      <span
+                        aria-hidden
+                        className="text-lg leading-none tracking-tight max-md:text-base max-md:text-text-secondary/85"
+                      >
                         ⋯
                       </span>
                     </summary>
@@ -1070,6 +1191,7 @@ export default function PostCard({
         supabase={supabase}
         currentUserId={currentUserId}
         threadRootPostId={threadRootPostId(post)}
+        onThreadNoteCountDelta={handleThreadNoteCountDelta}
       />
       <ReblogModal
         post={reblogModalPost}

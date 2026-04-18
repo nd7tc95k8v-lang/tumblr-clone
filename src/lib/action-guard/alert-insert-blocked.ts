@@ -60,5 +60,10 @@ export async function alertIfLikelyRateOrGuardFailure(
     }
   }
 
+  if (spec.kind === "note_comment") {
+    alert("Could not add that note. If it keeps happening, wait a minute and try again.");
+    return;
+  }
+
   alert(ACTION_GUARD_GENERIC_MESSAGE);
 }

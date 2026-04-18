@@ -11,6 +11,12 @@ import {
   followNormalizedTagForUser,
   unfollowNormalizedTagForUser,
 } from "@/lib/supabase/followed-tags";
+import {
+  DEFAULT_NSFW_FEED_MODE,
+  excludeNsfwPostsFromFeedQuery,
+  resolveNsfwFeedModeFromProfileRow,
+  type NsfwFeedMode,
+} from "@/lib/nsfw-feed-preference";
 import { fetchSearchPostsWithTwoTokenFallback, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
 import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
 import { getProfileLinkSlug } from "@/lib/username";
@@ -59,11 +65,23 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
 
   const hasQuery = qFromUrl.length > 0 || tagsListFromUrl.length > 0;
 
+  const initialPostsRef = useRef(initialPosts);
+  const initialLoadErrorRef = useRef(initialLoadError);
+  useEffect(() => {
+    initialPostsRef.current = initialPosts;
+    initialLoadErrorRef.current = initialLoadError;
+  }, [initialPosts, initialLoadError]);
+
   const [user, setUser] = useState<User | null>(null);
-  const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
+  const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
+  /** Signed-in: empty until session + `nsfw_feed_mode` resolved so SSR anon hits never flash for `hide`. */
+  const [posts, setPosts] = useState<FeedPost[]>([]);
   const [users, setUsers] = useState<SearchUserResult[]>(initialUsers);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => hasQuery);
   const [error, setError] = useState<string | null>(initialLoadError);
+  const [sessionChecked, setSessionChecked] = useState(false);
+  /** False only while a signed-in viewer’s `nsfw_feed_mode` row is being read. */
+  const [signedInFeedPrefsReady, setSignedInFeedPrefsReady] = useState(true);
 
   /** Normalized tag strings from `followed_tags`; empty when signed out. */
   const [followedNormSet, setFollowedNormSet] = useState<Set<string>>(() => new Set());
@@ -77,8 +95,10 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
   const [selectedTags, setSelectedTags] = useState<string[]>(tagsListFromUrl);
 
   useEffect(() => {
-    setPosts(initialPosts);
-  }, [initialPosts]);
+    if (!user?.id) {
+      setPosts(initialPosts);
+    }
+  }, [initialPosts, user?.id]);
 
   useEffect(() => {
     setUsers(initialUsers);
@@ -93,17 +113,56 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     setSelectedTags(tagsListFromUrl);
   }, [qFromUrl, tagsListFromUrl]);
 
+  const searchBootstrapSeq = useRef(0);
+
   useEffect(() => {
     if (!supabase) return;
-    void supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-    });
+
+    const runSessionAndFeedPrefs = async () => {
+      const seq = ++searchBootstrapSeq.current;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (seq !== searchBootstrapSeq.current) return;
+
+      const u = session?.user ?? null;
+      setUser(u);
+
+      if (!u) {
+        setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+        setSignedInFeedPrefsReady(true);
+        setPosts(initialPostsRef.current);
+        setError(initialLoadErrorRef.current);
+        setSessionChecked(true);
+        return;
+      }
+
+      setSignedInFeedPrefsReady(false);
+      setPosts([]);
+      const { data: prof, error: profErr } = await supabase
+        .from("profiles")
+        .select("nsfw_feed_mode")
+        .eq("id", u.id)
+        .maybeSingle();
+      if (seq !== searchBootstrapSeq.current) return;
+      if (profErr) console.error(profErr);
+      setNsfwFeedMode(resolveNsfwFeedModeFromProfileRow(prof));
+      setSignedInFeedPrefsReady(true);
+      setSessionChecked(true);
+    };
+
+    void runSessionAndFeedPrefs();
+
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange(() => {
+      void runSessionAndFeedPrefs();
     });
-    return () => subscription.unsubscribe();
+
+    return () => {
+      searchBootstrapSeq.current += 1;
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   useEffect(() => {
@@ -174,8 +233,11 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       setPosts([]);
       setUsers([]);
       setError(null);
+      setLoading(false);
       return;
     }
+    if (!sessionChecked) return;
+    if (user?.id && !signedInFeedPrefsReady) return;
     setLoading(true);
     setError(null);
     try {
@@ -183,6 +245,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
         rawQ: qFromUrl,
         tagsAny: tagsListFromUrl,
         viewerUserId: user?.id ?? null,
+        excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
       });
       const userText = qFromUrl.trim();
       const userPromise =
@@ -208,12 +271,21 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     } finally {
       setLoading(false);
     }
-  }, [supabase, hasQuery, qFromUrl, tagsListFromUrl, user?.id]);
+  }, [
+    supabase,
+    hasQuery,
+    qFromUrl,
+    tagsListFromUrl,
+    user?.id,
+    nsfwFeedMode,
+    sessionChecked,
+    signedInFeedPrefsReady,
+  ]);
 
   useEffect(() => {
     if (!supabase) return;
     void loadPosts();
-  }, [supabase, loadPosts]);
+  }, [supabase, loadPosts, sessionChecked, signedInFeedPrefsReady]);
 
   const submitSearch = useCallback(() => {
     const nextQ = textQ.trim();
@@ -473,6 +545,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
           postSearchHighlightTags={tagsListFromUrl}
           onPostDeleted={loadPosts}
           onPostUpdated={loadPosts}
+          nsfwFeedMode={nsfwFeedMode}
         />
       ) : (
         <p className="max-w-md text-center text-sm leading-relaxed text-text-secondary">

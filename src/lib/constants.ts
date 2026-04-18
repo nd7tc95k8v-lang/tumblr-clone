@@ -5,3 +5,6 @@ export const APP_SHORT = "Qrtz";
 /** Default meta description. */
 export const APP_DESCRIPTION =
   "Creative social platform for art, identity, and expression.";
+
+/** Dispatched after the inbox marks the read watermark (for nav badge refresh). */
+export const NOTIFICATION_INBOX_MARKED_READ_EVENT = "qrtz:notifications-read";

@@ -1,10 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** What the app is about to do; used for rate-limit rules on the client. Add `like` | `comment` | `message` later. */
+/** What the app is about to do; used for rate-limit rules on the client. Add `like` | `message` later. */
 export type ProtectedActionSpec =
   | { kind: "post" }
   | { kind: "reblog" }
-  | { kind: "follow"; followMode: "insert" | "delete" };
+  | { kind: "follow"; followMode: "insert" | "delete" }
+  /** Short thread-root note comments (human-check + server rate limit; not post compose limits). */
+  | { kind: "note_comment" };
 
 export type ActionGuardStatus = {
   authenticated: boolean;

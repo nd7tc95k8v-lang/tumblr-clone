@@ -116,6 +116,7 @@ export function buildOptimisticReblogFeedPost(input: {
     quoted_post,
     like_count: source.like_count,
     reblog_count: source.reblog_count + 1,
+    note_comment_count: source.note_comment_count,
     liked_by_me: false,
   };
 }

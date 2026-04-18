@@ -1,3 +1,5 @@
+import type { NsfwFeedMode } from "@/lib/nsfw-feed-preference";
+
 export type ProfilePublic = {
   id: string;
   username: string;
@@ -8,4 +10,6 @@ export type ProfilePublic = {
   profile_is_nsfw: boolean;
   /** When true, new originals by this user are marked NSFW on insert (DB trigger). */
   default_posts_nsfw: boolean;
+  /** Viewer feed policy for discovery surfaces; see `parseNsfwFeedMode`. */
+  nsfw_feed_mode?: NsfwFeedMode;
 };
