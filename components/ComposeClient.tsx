@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
@@ -12,6 +12,37 @@ const PENDING_FEED_POST_STORAGE_KEY = "qrtz:pendingFeedPost";
 export default function ComposeClient() {
   const router = useRouter();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
+  const [defaultMarkNsfw, setDefaultMarkNsfw] = useState(false);
+  const [profilePrefsReady, setProfilePrefsReady] = useState(false);
+
+  useEffect(() => {
+    if (!supabase) {
+      setProfilePrefsReady(true);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user) {
+        if (!cancelled) setProfilePrefsReady(true);
+        return;
+      }
+      const { data: row, error } = await supabase
+        .from("profiles")
+        .select("default_posts_nsfw")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) console.error(error);
+      setDefaultMarkNsfw(Boolean(row?.default_posts_nsfw));
+      setProfilePrefsReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
 
   if (!supabase) {
     return (
@@ -25,9 +56,23 @@ export default function ComposeClient() {
     );
   }
 
+  if (!profilePrefsReady) {
+    return (
+      <div
+        className="qrtz-card mx-auto flex w-full max-w-md min-h-[12rem] flex-col items-center justify-center gap-1 border border-border-soft px-4 py-8 text-center"
+        aria-busy="true"
+        aria-label="Loading composer"
+      >
+        <p className="text-meta font-medium text-text">Loading composer…</p>
+        <p className="text-meta text-text-muted">Checking your posting settings.</p>
+      </div>
+    );
+  }
+
   return (
     <PostForm
       supabase={supabase}
+      defaultMarkNsfw={defaultMarkNsfw}
       onPosted={async () => {
         const {
           data: { session },

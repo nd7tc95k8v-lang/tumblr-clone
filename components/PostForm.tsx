@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { ALLOWED_IMAGE_MIME_TYPES, validateImageFile } from "@/lib/image-upload-validation";
@@ -443,8 +444,14 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
         <div className="text-meta text-text-secondary">
           <p className="font-medium text-text">This post will be marked mature / NSFW</p>
           <p className="mt-0.5 text-[0.8125rem] leading-snug text-text-muted">
-            Your posting default is turned on in Settings. Reblogs inherit mature status from the parent chain, and
-            mature status cannot be removed after posting.
+            Your posting default is turned on in{" "}
+            <Link
+              href="/settings"
+              className="text-link hover:text-link-hover hover:underline transition-colors"
+            >
+              Settings
+            </Link>
+            . Reblogs inherit mature status from the parent chain, and mature status cannot be removed after posting.
           </p>
         </div>
       ) : (
@@ -459,8 +466,8 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
           <span>
             <span className="font-medium text-text">Mark as mature / NSFW</span>
             <span className="mt-0.5 block text-[0.8125rem] leading-snug text-text-muted">
-              Starts from your profile default; the database sets the final flag when you publish. Can’t be removed after
-              post. Reblogs inherit mature status from the parent chain.
+              Use this if your post contains mature content. This can't be removed after posting. Reblogs inherit this
+              status.
             </span>
           </span>
         </label>

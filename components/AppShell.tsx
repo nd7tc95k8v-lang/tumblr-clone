@@ -9,6 +9,19 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 import SidebarAccount from "./SidebarAccount";
 
+const SPLASH_SLOGANS = [
+  "Find your voice. Shape the vibe.",
+  "Create boldly. Belong naturally.",
+  "A welcoming space for creative voices.",
+  "Share your art. Find your people.",
+  "Where creators shape the conversation.",
+];
+
+/** Mobile splash: fade starts ~900ms after paint; overlay unmounts ~1300ms (~400ms opacity transition). */
+const SPLASH_FADE_START_MS = 900;
+const SPLASH_TOTAL_MS = 1300;
+const SPLASH_FADE_DURATION_MS = SPLASH_TOTAL_MS - SPLASH_FADE_START_MS;
+
 const linkBase =
   "block rounded-lg px-3 py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg";
 const linkActive =
@@ -68,6 +81,35 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const { user, username, profileHref, refreshAuth } = useSupabaseSidebarAuth(supabase);
+
+  const [slogan] = useState(() => {
+    const i = Math.floor(Math.random() * SPLASH_SLOGANS.length);
+    return SPLASH_SLOGANS[i];
+  });
+
+  const [splashMounted, setSplashMounted] = useState(true);
+  const [splashFading, setSplashFading] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let fadeStartTimer: ReturnType<typeof setTimeout>;
+    let unmountTimer: ReturnType<typeof setTimeout>;
+
+    if (reduceMotion.matches) {
+      unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_FADE_START_MS);
+      return () => window.clearTimeout(unmountTimer);
+    }
+
+    fadeStartTimer = window.setTimeout(() => setSplashFading(true), SPLASH_FADE_START_MS);
+    unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_TOTAL_MS);
+
+    return () => {
+      window.clearTimeout(fadeStartTimer);
+      window.clearTimeout(unmountTimer);
+    };
+  }, []);
 
   const sidebarItems: NavItem[] = [
     { href: "/", label: "Home", match: (p) => p === "/" },
@@ -140,6 +182,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-full flex flex-col bg-bg">
+      {splashMounted ? (
+        <div
+          className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-bg px-6 md:hidden pointer-events-none transition-opacity ease-out ${
+            splashFading ? "opacity-0" : "opacity-100"
+          }`}
+          style={{ transitionDuration: `${SPLASH_FADE_DURATION_MS}ms` }}
+          aria-hidden="true"
+        >
+          <img
+            src="/logo/qrtz-logo.svg"
+            alt=""
+            className="h-9 w-auto shrink-0"
+            width={126}
+            height={36}
+          />
+          <p className="max-w-[min(280px,100vw-3rem)] text-center text-[13px] leading-snug text-text-muted">{slogan}</p>
+        </div>
+      ) : null}
       <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center gap-2 border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
         <div className="min-w-0 flex-1">
           <Link
