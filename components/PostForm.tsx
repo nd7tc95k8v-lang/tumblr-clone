@@ -439,22 +439,32 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
           className="qrtz-field py-2 text-sm"
         />
       </div>
-      <label className="flex cursor-pointer items-start gap-2 text-meta text-text-secondary">
-        <input
-          type="checkbox"
-          checked={markNsfw}
-          onChange={(e) => setMarkNsfw(e.target.checked)}
-          disabled={submitting}
-          className="qrtz-checkbox mt-0.5"
-        />
-        <span>
-          <span className="font-medium text-text">Mark as mature / NSFW</span>
-          <span className="mt-0.5 block text-[0.8125rem] leading-snug text-text-muted">
-            Starts from your profile default; the database sets the final flag when you publish. Can’t be removed after
-            post. Reblogs inherit mature status from the parent chain.
+      {defaultMarkNsfw ? (
+        <div className="text-meta text-text-secondary">
+          <p className="font-medium text-text">This post will be marked mature / NSFW</p>
+          <p className="mt-0.5 text-[0.8125rem] leading-snug text-text-muted">
+            Your posting default is turned on in Settings. Reblogs inherit mature status from the parent chain, and
+            mature status cannot be removed after posting.
+          </p>
+        </div>
+      ) : (
+        <label className="flex cursor-pointer items-start gap-2 text-meta text-text-secondary">
+          <input
+            type="checkbox"
+            checked={markNsfw}
+            onChange={(e) => setMarkNsfw(e.target.checked)}
+            disabled={submitting}
+            className="qrtz-checkbox mt-0.5"
+          />
+          <span>
+            <span className="font-medium text-text">Mark as mature / NSFW</span>
+            <span className="mt-0.5 block text-[0.8125rem] leading-snug text-text-muted">
+              Starts from your profile default; the database sets the final flag when you publish. Can’t be removed after
+              post. Reblogs inherit mature status from the parent chain.
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      )}
       <button
         type="submit"
         disabled={submitting}
