@@ -29,8 +29,22 @@ update public.posts
 set original_post_id = id
 where original_post_id is null;
 
-alter table public.posts
-  alter column original_post_id set not null;
+do $$
+declare
+  n_null bigint;
+begin
+  select count(*) into n_null
+  from public.posts
+  where original_post_id is null;
+
+  if n_null > 0 then
+    raise exception
+      'Migration 009: cannot set posts.original_post_id to NOT NULL because % row(s) still have NULL after backfill updates. Fix broken reblog chains or orphaned rows, then re-run. Inspect: SELECT id, user_id, reblog_of, original_post_id FROM public.posts WHERE original_post_id IS NULL LIMIT 50;',
+      n_null;
+  end if;
+
+  execute 'alter table public.posts alter column original_post_id set not null';
+end $$;
 
 alter table public.posts
   drop constraint if exists posts_original_post_id_fkey;
