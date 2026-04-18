@@ -32,7 +32,7 @@ function PreviewThumb({ file, onRemove }: { file: File; onRemove: () => void }) 
   }, [file]);
 
   return (
-    <div className="relative aspect-square w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-bg-secondary">
+    <div className="relative aspect-square w-[4.5rem] shrink-0 overflow-hidden rounded-md border border-border/70 bg-bg-secondary ring-1 ring-black/[0.03] dark:ring-white/[0.04]">
       {url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="h-full w-full object-cover" />
@@ -42,6 +42,9 @@ function PreviewThumb({ file, onRemove }: { file: File; onRemove: () => void }) 
       <button
         type="button"
         onClick={onRemove}
+        onMouseDown={(e) => {
+          e.preventDefault();
+        }}
         className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus"
         aria-label="Remove image"
       >
@@ -61,6 +64,81 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
   const [formError, setFormError] = useState<string | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const selectionBackupRef = useRef<{ start: number; end: number } | null>(null);
+  const skipFocusScrollRef = useRef(false);
+
+  const backupSelection = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    selectionBackupRef.current = { start: el.selectionStart, end: el.selectionEnd };
+  }, []);
+
+  const restoreTextareaSelection = useCallback(() => {
+    const el = textareaRef.current;
+    const sel = selectionBackupRef.current;
+    if (!el || !sel) return;
+    requestAnimationFrame(() => {
+      el.focus({ preventScroll: true });
+      try {
+        el.setSelectionRange(sel.start, sel.end);
+      } catch {
+        /* selection out of range after edits */
+      }
+    });
+  }, []);
+
+  const handleTextareaFocus = useCallback((e: React.FocusEvent<HTMLTextAreaElement>) => {
+    if (skipFocusScrollRef.current) {
+      skipFocusScrollRef.current = false;
+      return;
+    }
+    const el = e.currentTarget;
+    const coarse = window.matchMedia("(pointer: coarse)").matches;
+    const runScroll = () => {
+      el.scrollIntoView({
+        behavior: "smooth",
+        block: coarse ? "center" : "nearest",
+        inline: "nearest",
+      });
+    };
+    if (coarse) {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(runScroll);
+      });
+    } else {
+      window.requestAnimationFrame(runScroll);
+    }
+  }, []);
+
+  const handleTextareaBlur = useCallback((e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const el = e.currentTarget;
+    selectionBackupRef.current = { start: el.selectionStart, end: el.selectionEnd };
+  }, []);
+
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return;
+      if (window.matchMedia("(pointer: coarse)").matches) return;
+      e.preventDefault();
+      if (submitting) return;
+      e.currentTarget.form?.requestSubmit();
+    },
+    [submitting],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(pointer: coarse)").matches) return;
+
+    skipFocusScrollRef.current = true;
+    const id = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        textareaRef.current?.focus({ preventScroll: true });
+      });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, []);
 
   useEffect(() => {
     setMarkNsfw(Boolean(defaultMarkNsfw));
@@ -230,65 +308,40 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
   return (
     <form
       onSubmit={handleSubmit}
-      className="qrtz-card mx-auto flex w-full max-w-md flex-col gap-5"
+      className="qrtz-card mx-auto flex w-full max-w-md flex-col gap-3"
     >
-      <label htmlFor="post-content" className="font-heading text-lg font-semibold text-text">
+      <label htmlFor="post-content" className="text-meta font-medium text-text-secondary">
         Write a post
       </label>
       <InlineErrorBanner message={formError} onDismiss={() => setFormError(null)} />
-      <textarea
-        id="post-content"
-        className="qrtz-field min-h-[100px]"
-        value={content}
-        onChange={(e) => {
-          setContent(e.target.value);
-          if (formError) setFormError(null);
-        }}
-        placeholder="What's on your mind?"
-        required
-      />
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="post-tags" className="text-meta font-medium text-text-secondary">
-          Tags <span className="font-normal text-text-muted">(optional, comma-separated)</span>
-        </label>
-        <input
-          id="post-tags"
-          type="text"
-          value={tagsRaw}
-          onChange={(e) => setTagsRaw(e.target.value)}
-          disabled={submitting}
-          placeholder="e.g. photo, weekend, cats"
-          className="qrtz-field"
+      <div className="overflow-hidden rounded-xl border border-border-soft bg-input shadow-sm">
+        <textarea
+          ref={textareaRef}
+          id="post-content"
+          className="qrtz-field min-h-[128px] w-full resize-y rounded-none border-0 border-b border-border/45 bg-transparent px-3.5 py-3 text-base leading-relaxed text-text placeholder:text-text-muted shadow-none focus:ring-2 focus:ring-inset focus:ring-border-focus/55 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus/55 scroll-mt-[calc(2.75rem+env(safe-area-inset-top,0px))] scroll-mb-[calc(5rem+env(safe-area-inset-bottom,0px))]"
+          value={content}
+          onChange={(e) => {
+            setContent(e.target.value);
+            if (formError) setFormError(null);
+          }}
+          onSelect={backupSelection}
+          onFocus={handleTextareaFocus}
+          onBlur={handleTextareaBlur}
+          onKeyDown={handleTextareaKeyDown}
+          placeholder="What's on your mind?"
+          required
         />
-      </div>
-      <label className="flex cursor-pointer items-start gap-2.5 text-sm text-text-secondary">
-        <input
-          type="checkbox"
-          checked={markNsfw}
-          onChange={(e) => setMarkNsfw(e.target.checked)}
-          disabled={submitting}
-          className="qrtz-checkbox"
-        />
-        <span>
-          <span className="font-medium text-text">Mark as mature / NSFW</span>
-          <span className="mt-1 block text-meta text-text-muted">
-            Matches your profile default when you open the composer; the database still decides the final flag.
-            Cannot be removed after posting. Reblogs inherit mature status from the parent chain—you can’t strip it.
-          </span>
-        </span>
-      </label>
-
-      <div className="flex flex-col gap-2">
-        <span className="text-meta font-medium text-text-secondary">
-          Images <span className="font-normal text-text-muted">(optional, up to {MAX_POST_IMAGES})</span>
-        </span>
         <div
           role="button"
           tabIndex={0}
+          aria-label={`Add images to this post, optional, up to ${MAX_POST_IMAGES} files`}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              if (!submitting && canAddCount > 0) fileInputRef.current?.click();
+              if (!submitting && canAddCount > 0) {
+                backupSelection();
+                fileInputRef.current?.click();
+              }
             }
           }}
           onDragEnter={(e) => {
@@ -311,16 +364,29 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
             e.stopPropagation();
             setDragActive(false);
             if (submitting || canAddCount === 0) return;
+            backupSelection();
             addValidatedFiles(Array.from(e.dataTransfer.files ?? []));
+            queueMicrotask(() => {
+              restoreTextareaSelection();
+            });
           }}
-          onClick={() => !submitting && canAddCount > 0 && fileInputRef.current?.click()}
-          className={`cursor-pointer rounded-card border-2 border-dashed px-3 py-6 text-center transition-colors ${
-            dragActive ? "border-accent-aqua/60 bg-surface-blue/40" : "border-border bg-bg-secondary/50"
+          onMouseDown={() => {
+            backupSelection();
+          }}
+          onClick={() => {
+            if (submitting || canAddCount === 0) return;
+            backupSelection();
+            fileInputRef.current?.click();
+          }}
+          className={`cursor-pointer border-t border-dashed border-border/55 px-3 py-3 text-center transition-colors ${
+            dragActive ? "bg-surface-blue/45" : "bg-bg-secondary/25"
           } ${submitting || canAddCount === 0 ? "pointer-events-none opacity-50" : ""}`}
         >
-          <p className="text-sm text-text-secondary">
-            Drag and drop images here, or click to choose
-            {canAddCount === 0 ? <span className="mt-1 block text-meta text-warning">Maximum reached.</span> : null}
+          <p className="text-meta leading-snug text-text-secondary">
+            Drop photos here or click to browse
+            {canAddCount === 0 ? (
+              <span className="mt-1 block text-warning">Maximum {MAX_POST_IMAGES} reached.</span>
+            ) : null}
           </p>
         </div>
         <input
@@ -336,28 +402,63 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
             if (!files.length) return;
             addValidatedFiles(files);
             e.target.value = "";
+            queueMicrotask(() => {
+              restoreTextareaSelection();
+            });
           }}
         />
         {selectedFiles.length > 0 ? (
-          <ul className="flex flex-wrap gap-2 p-0 list-none">
-            {selectedFiles.map((f, i) => (
-              <li key={`${f.name}-${i}-${f.size}`}>
-                <PreviewThumb
-                  file={f}
-                  onRemove={() => {
-                    setSelectedFiles((prev) => prev.filter((_, j) => j !== i));
-                    setFormError(null);
-                  }}
-                />
-              </li>
-            ))}
-          </ul>
+          <div className="border-t border-border/40 bg-bg-secondary/20 px-2 py-2">
+            <ul className="flex list-none flex-wrap gap-1.5 p-0">
+              {selectedFiles.map((f, i) => (
+                <li key={`${f.name}-${i}-${f.size}`}>
+                  <PreviewThumb
+                    file={f}
+                    onRemove={() => {
+                      setSelectedFiles((prev) => prev.filter((_, j) => j !== i));
+                      setFormError(null);
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
       </div>
+      <div className="flex flex-col gap-1">
+        <label htmlFor="post-tags" className="text-meta text-text-secondary">
+          Tags <span className="font-normal text-text-muted">· optional, commas</span>
+        </label>
+        <input
+          id="post-tags"
+          type="text"
+          value={tagsRaw}
+          onChange={(e) => setTagsRaw(e.target.value)}
+          disabled={submitting}
+          placeholder="e.g. photo, weekend, cats"
+          className="qrtz-field py-2 text-sm"
+        />
+      </div>
+      <label className="flex cursor-pointer items-start gap-2 text-meta text-text-secondary">
+        <input
+          type="checkbox"
+          checked={markNsfw}
+          onChange={(e) => setMarkNsfw(e.target.checked)}
+          disabled={submitting}
+          className="qrtz-checkbox mt-0.5"
+        />
+        <span>
+          <span className="font-medium text-text">Mark as mature / NSFW</span>
+          <span className="mt-0.5 block text-[0.8125rem] leading-snug text-text-muted">
+            Starts from your profile default; the database sets the final flag when you publish. Can’t be removed after
+            post. Reblogs inherit mature status from the parent chain.
+          </span>
+        </span>
+      </label>
       <button
         type="submit"
         disabled={submitting}
-        className="qrtz-btn-primary px-4 py-2"
+        className="qrtz-btn-primary mt-0.5 px-4 py-2"
       >
         {submitting ? "Posting…" : "Post"}
       </button>

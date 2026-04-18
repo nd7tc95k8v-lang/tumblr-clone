@@ -1,8 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { getCurrentHumanChallenge } from "@/lib/action-guard/challenges";
+import {
+  pickRandomHumanChallenge,
+  type HumanMcqChallengeInstance,
+} from "@/lib/action-guard/challenges";
 
 type Props = {
   open: boolean;
@@ -15,18 +18,26 @@ type Props = {
 type MarkHumanResult = { ok?: boolean; error?: string };
 
 export default function HumanCheckModal({ open, supabase, onClose, onComplete }: Props) {
-  const [answer, setAnswer] = useState("");
+  const [challenge, setChallenge] = useState<HumanMcqChallengeInstance | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const firstButtonRef = useRef<HTMLButtonElement | null>(null);
 
-  const challenge = getCurrentHumanChallenge();
-
-  useEffect(() => {
-    if (!open) return;
-    setAnswer("");
+  useLayoutEffect(() => {
+    if (!open) {
+      setChallenge(null);
+      return;
+    }
+    setChallenge(pickRandomHumanChallenge());
     setError(null);
     setBusy(false);
   }, [open]);
+
+  useEffect(() => {
+    if (open && firstButtonRef.current) {
+      firstButtonRef.current.focus({ preventScroll: true });
+    }
+  }, [open, challenge]);
 
   useEffect(() => {
     if (!open) return;
@@ -37,21 +48,13 @@ export default function HumanCheckModal({ open, supabase, onClose, onComplete }:
     return () => window.removeEventListener("keydown", onKey);
   }, [open, busy, onClose]);
 
-  if (!open) return null;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    const normalized = answer.trim().toLowerCase();
-    if (!challenge.validate(normalized)) {
-      setError("That doesn't match. Check the prompt and try again.");
-      return;
-    }
+  const passHumanCheck = useCallback(async () => {
     if (!supabase) {
       setError("Not connected.");
       return;
     }
     setBusy(true);
+    setError(null);
     try {
       const { data, error: rpcError } = await supabase.rpc("mark_human_check_passed");
       if (rpcError) {
@@ -67,7 +70,22 @@ export default function HumanCheckModal({ open, supabase, onClose, onComplete }:
     } finally {
       setBusy(false);
     }
-  };
+  }, [supabase, onComplete]);
+
+  const handleChoice = useCallback(
+    (option: string) => {
+      if (busy || !challenge) return;
+      if (option !== challenge.correct) {
+        setError("Not quite — here's another one.");
+        setChallenge(pickRandomHumanChallenge());
+        return;
+      }
+      void passHumanCheck();
+    },
+    [busy, challenge, passHumanCheck],
+  );
+
+  if (!open || !challenge) return null;
 
   return (
     <div
@@ -82,42 +100,45 @@ export default function HumanCheckModal({ open, supabase, onClose, onComplete }:
         onClick={(ev) => ev.stopPropagation()}
         className="qrtz-modal-panel"
       >
-        <h2 id="human-check-title" className="mb-3 font-heading text-lg font-semibold text-text">
-          Quick human check
+        <h2 id="human-check-title" className="mb-2 font-heading text-lg font-semibold text-text">
+          Quick check
         </h2>
-        <p className="mb-4 text-meta leading-relaxed text-text-secondary">
-          Once a day we ask for this before you post, reblog, or follow. No third-party CAPTCHA.
+        <p className="mb-1 text-base text-text-secondary">Answer one short question to continue.</p>
+        <p className="mb-4 text-meta leading-relaxed text-text-muted">
+          We ask once a day before you post, reblog, or follow — no third-party CAPTCHA.
         </p>
-        <p className="mb-4 text-base font-medium text-text">{challenge.prompt}</p>
-        <form onSubmit={(ev) => void handleSubmit(ev)} className="flex flex-col gap-4">
-          <input
-            type="text"
-            autoComplete="off"
-            value={answer}
-            onChange={(ev) => setAnswer(ev.target.value)}
-            disabled={busy}
-            className="qrtz-field"
-            placeholder="Your answer"
-          />
-          {error ? <p className="text-sm text-error">{error}</p> : null}
-          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={busy}
-              className="qrtz-btn-secondary px-4 py-2 text-sm"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={busy}
-              className="qrtz-btn-primary px-4 py-2 text-sm"
-            >
-              {busy ? "Saving…" : "Continue"}
-            </button>
+        <fieldset className="m-0 border-0 p-0">
+          <legend className="mb-3 w-full text-base font-medium text-text">{challenge.prompt}</legend>
+          <div className="flex flex-col gap-2">
+            {challenge.options.map((opt, i) => (
+              <button
+                key={`${challenge.instanceKey}-${i}`}
+                ref={i === 0 ? firstButtonRef : undefined}
+                type="button"
+                disabled={busy}
+                onClick={() => handleChoice(opt)}
+                className="qrtz-btn-secondary w-full justify-start px-4 py-3 text-sm"
+              >
+                {opt}
+              </button>
+            ))}
           </div>
-        </form>
+        </fieldset>
+        {error ? (
+          <p className="mt-3 text-sm text-error" role="status" aria-live="polite">
+            {error}
+          </p>
+        ) : null}
+        <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="qrtz-btn-secondary px-4 py-2 text-sm"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -7,6 +7,7 @@ import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 import ThemeAppearanceSettings from "./ThemeAppearanceSettings";
+import ContentSafetySettings from "./ContentSafetySettings";
 
 export default function SettingsClient() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -30,7 +31,9 @@ export default function SettingsClient() {
   }, [supabase]);
 
   useEffect(() => {
-    void refresh();
+    queueMicrotask(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export default function SettingsClient() {
   return (
     <div className="w-full max-w-md flex flex-col gap-6">
       <ThemeAppearanceSettings />
+      {user ? <ContentSafetySettings supabase={supabase} user={user} /> : null}
       <section className="qrtz-card">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted mb-3">Account</h2>
         {user ? (

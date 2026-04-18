@@ -119,27 +119,32 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     </Link>
   );
 
-  const bottomBar =
-    "flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 py-2 text-center text-meta font-medium leading-tight";
   const bottomBarFocus =
-    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-focus/70";
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-focus/60";
+  const mobileTabBase =
+    "relative flex min-h-[3.25rem] min-w-0 touch-manipulation flex-col items-center justify-center gap-1 px-0.5 pb-2 pt-1 text-center text-[11px] font-medium leading-none tracking-wide transition-[color,background-color] duration-150 ease-out";
+  const mobileTabInactive = "text-text-muted active:bg-bg-secondary/55";
+  const mobileTabActive =
+    "font-semibold text-text after:pointer-events-none after:absolute after:bottom-1.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-text/80";
+  const mobilePostTabActive =
+    "font-semibold text-text after:pointer-events-none after:absolute after:bottom-1.5 after:left-1/2 after:h-0.5 after:w-7 after:-translate-x-1/2 after:rounded-full after:bg-accent-aqua/90";
 
   return (
     <div className="min-h-full flex flex-col bg-bg">
-      <header className="sticky top-0 z-30 flex h-12 min-w-0 shrink-0 items-center border-b border-border bg-bg/95 px-4 backdrop-blur-sm md:hidden">
+      <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
         <Link
           href="/"
-          className="flex min-w-0 max-w-full items-center gap-2 text-text"
+          className="flex min-h-[2.25rem] min-w-0 max-w-full items-center gap-2 text-text transition-opacity hover:opacity-90 active:opacity-80"
           aria-label={APP_NAME}
         >
           <img
             src="/logo/qrtz-logo.svg"
             alt=""
-            className="h-7 w-auto shrink-0"
-            width={120}
-            height={28}
+            className="h-6 w-auto shrink-0"
+            width={112}
+            height={24}
           />
-          <span className="min-w-0 truncate text-lg font-semibold tracking-tight">{APP_NAME}</span>
+          <span className="min-w-0 truncate text-base font-semibold tracking-tight">{APP_NAME}</span>
         </Link>
       </header>
 
@@ -164,7 +169,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </aside>
 
-        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto pb-[calc(3.75rem+env(safe-area-inset-bottom,0px))] md:pb-0 bg-bg flex flex-col">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-bg pb-[calc(4rem+env(safe-area-inset-bottom,0px))] md:pb-0">
           <div className="flex-1 min-h-0">{children}</div>
           <footer className="shrink-0 border-t border-border px-4 py-4 text-center text-meta text-text-muted">
             © 2026 {APP_NAME}
@@ -173,40 +178,47 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <nav
-        className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-border bg-bg/95 backdrop-blur-sm md:hidden pb-[env(safe-area-inset-bottom,0px)]"
+        className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 items-stretch border-t border-border/40 bg-bg/90 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-10px_40px_-18px_rgba(0,0,0,0.08)] backdrop-blur-md md:hidden"
         aria-label="Mobile navigation"
       >
         {items.slice(0, 2).map(({ href, label, match }) => (
           <Link
             key={label}
             href={href}
-            className={`${bottomBar} ${bottomBarFocus} ${
-              match(pathname) ? "text-text" : "text-text-muted active:bg-bg-secondary"
-            }`}
+            className={`${mobileTabBase} ${bottomBarFocus} ${match(pathname) ? mobileTabActive : mobileTabInactive}`}
           >
-            <span className="truncate max-w-full px-0.5">{label}</span>
+            <span className="max-w-full truncate px-0.5">{label}</span>
           </Link>
         ))}
         <Link
           href="/compose"
-          className={`${bottomBar} ${bottomBarFocus} ${
-            createActive ? "font-semibold text-accent-aqua" : "text-accent-aqua active:bg-primary-soft/40"
+          className={`${mobileTabBase} ${bottomBarFocus} ${
+            createActive ? mobilePostTabActive : "text-text-secondary active:bg-bg-secondary/55"
           }`}
         >
-          <span className="qrtz-btn-primary mb-0.5 flex min-h-[1.5rem] min-w-[1.5rem] items-center justify-center rounded-full px-2 py-1 text-[10px] font-bold leading-none">
+          <span
+            className={`qrtz-btn-primary mb-px flex size-9 shrink-0 items-center justify-center rounded-full text-[15px] font-semibold leading-none shadow-sm ring-1 ring-white/20 transition-[transform,box-shadow] duration-150 ease-out ${
+              createActive ? "shadow-md ring-white/25" : ""
+            }`}
+            aria-hidden
+          >
             +
           </span>
-          <span className="truncate max-w-full">Post</span>
+          <span
+            className={`max-w-full truncate px-0.5 text-[11px] font-semibold leading-none tracking-wide ${
+              createActive ? "text-accent-aqua" : "text-text-muted"
+            }`}
+          >
+            Post
+          </span>
         </Link>
         {items.slice(2).map(({ href, label, match }) => (
           <Link
             key={label}
             href={href}
-            className={`${bottomBar} ${bottomBarFocus} ${
-              match(pathname) ? "text-text" : "text-text-muted active:bg-bg-secondary"
-            }`}
+            className={`${mobileTabBase} ${bottomBarFocus} ${match(pathname) ? mobileTabActive : mobileTabInactive}`}
           >
-            <span className="truncate max-w-full px-0.5">{label}</span>
+            <span className="max-w-full truncate px-0.5">{label}</span>
           </Link>
         ))}
       </nav>
