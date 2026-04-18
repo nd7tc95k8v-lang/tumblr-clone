@@ -13,10 +13,14 @@ create index if not exists follows_follower_id_idx on public.follows (follower_i
 
 alter table public.follows enable row level security;
 
+drop policy if exists "follows_select_as_follower" on public.follows;
+
 create policy "follows_select_as_follower"
   on public.follows for select
   to authenticated
   using (follower_id = auth.uid());
+
+drop policy if exists "follows_insert_own" on public.follows;
 
 create policy "follows_insert_own"
   on public.follows for insert
@@ -25,6 +29,8 @@ create policy "follows_insert_own"
     follower_id = auth.uid()
     and follower_id <> following_id
   );
+
+drop policy if exists "follows_delete_own" on public.follows;
 
 create policy "follows_delete_own"
   on public.follows for delete

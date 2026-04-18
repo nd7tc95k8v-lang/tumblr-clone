@@ -57,6 +57,8 @@ where id = 'post-images';
 drop policy if exists "post-images select public" on storage.objects;
 
 -- Uploader can always read their own objects (upload flow + debugging).
+drop policy if exists "post-images select own folder" on storage.objects;
+
 create policy "post-images select own folder"
   on storage.objects for select
   to authenticated
@@ -66,6 +68,8 @@ create policy "post-images select own folder"
   );
 
 -- Signed URL / API read when some post row references this object and reader may see that post (SFW or adult OK).
+drop policy if exists "post-images select via visible post authenticated" on storage.objects;
+
 create policy "post-images select via visible post authenticated"
   on storage.objects for select
   to authenticated
@@ -82,6 +86,8 @@ create policy "post-images select via visible post authenticated"
     )
   );
 
+drop policy if exists "post-images select via sfw post anon" on storage.objects;
+
 create policy "post-images select via sfw post anon"
   on storage.objects for select
   to anon
@@ -96,6 +102,8 @@ create policy "post-images select via sfw post anon"
   );
 
 -- Legacy: rows not yet backfilled (image_storage_path null) still tied by image_url suffix match.
+drop policy if exists "post-images select legacy url authenticated" on storage.objects;
+
 create policy "post-images select legacy url authenticated"
   on storage.objects for select
   to authenticated
@@ -113,6 +121,8 @@ create policy "post-images select legacy url authenticated"
         )
     )
   );
+
+drop policy if exists "post-images select legacy url anon sfw" on storage.objects;
 
 create policy "post-images select legacy url anon sfw"
   on storage.objects for select
@@ -133,6 +143,8 @@ create policy "post-images select legacy url anon sfw"
 -- Likes: cannot like a post the viewer is not allowed to SELECT under post RLS.
 -- ---------------------------------------------------------------------------
 drop policy if exists "likes_insert_own" on public.likes;
+
+drop policy if exists "likes_insert_own_visible_post" on public.likes;
 
 create policy "likes_insert_own_visible_post"
   on public.likes for insert

@@ -61,6 +61,8 @@ create index if not exists age_verification_events_user_created_idx
 alter table public.age_verification_events enable row level security;
 
 -- No direct inserts from clients; RPC uses security definer.
+drop policy if exists "age_verification_select_own" on public.age_verification_events;
+
 create policy "age_verification_select_own"
   on public.age_verification_events for select
   to authenticated
@@ -192,6 +194,8 @@ create trigger posts_enforce_nsfw_trigger
 drop policy if exists "Anonymous users can read posts" on public.posts;
 drop policy if exists "Authenticated users can read posts" on public.posts;
 
+drop policy if exists "posts_select_respect_nsfw_anon" on public.posts;
+
 create policy "posts_select_respect_nsfw_anon"
   on public.posts for select
   to anon
@@ -199,6 +203,8 @@ create policy "posts_select_respect_nsfw_anon"
     not coalesce(posts.is_nsfw, false)
     or public.adult_content_access_ok(auth.uid())
   );
+
+drop policy if exists "posts_select_respect_nsfw_authenticated" on public.posts;
 
 create policy "posts_select_respect_nsfw_authenticated"
   on public.posts for select

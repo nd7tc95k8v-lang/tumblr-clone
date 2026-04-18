@@ -13,10 +13,14 @@ create index if not exists likes_user_id_idx on public.likes (user_id);
 
 alter table public.likes enable row level security;
 
+drop policy if exists "likes_insert_own" on public.likes;
+
 create policy "likes_insert_own"
   on public.likes for insert
   to authenticated
   with check (auth.uid() = user_id);
+
+drop policy if exists "likes_delete_own" on public.likes;
 
 create policy "likes_delete_own"
   on public.likes for delete

@@ -182,6 +182,8 @@ grant execute on function public.get_action_guard_status() to authenticated;
 
 drop policy if exists "Users insert own posts" on public.posts;
 
+drop policy if exists "posts_insert_own_guarded" on public.posts;
+
 create policy "posts_insert_own_guarded"
   on public.posts for insert
   to authenticated

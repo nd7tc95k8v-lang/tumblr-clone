@@ -24,6 +24,8 @@ comment on table public.post_images is
 alter table public.post_images enable row level security;
 
 -- Read when the parent post is visible (same NSFW rules as posts).
+drop policy if exists "post_images_select_via_post_anon" on public.post_images;
+
 create policy "post_images_select_via_post_anon"
   on public.post_images for select
   to anon
@@ -35,6 +37,8 @@ create policy "post_images_select_via_post_anon"
         and not coalesce(p.is_nsfw, false)
     )
   );
+
+drop policy if exists "post_images_select_via_post_authenticated" on public.post_images;
 
 create policy "post_images_select_via_post_authenticated"
   on public.post_images for select
@@ -74,12 +78,16 @@ $$;
 revoke all on function public.post_image_row_insert_allowed(uuid, text) from public;
 grant execute on function public.post_image_row_insert_allowed(uuid, text) to authenticated;
 
+drop policy if exists "post_images_insert_own_post" on public.post_images;
+
 create policy "post_images_insert_own_post"
   on public.post_images for insert
   to authenticated
   with check (
     public.post_image_row_insert_allowed(post_id, storage_path)
   );
+
+drop policy if exists "post_images_delete_own_post" on public.post_images;
 
 create policy "post_images_delete_own_post"
   on public.post_images for delete
@@ -96,6 +104,8 @@ create policy "post_images_delete_own_post"
 -- ---------------------------------------------------------------------------
 -- Storage: allow read when path is referenced by post_images + post visible
 -- ---------------------------------------------------------------------------
+drop policy if exists "post-images select via post_images authenticated" on storage.objects;
+
 create policy "post-images select via post_images authenticated"
   on storage.objects for select
   to authenticated
@@ -112,6 +122,8 @@ create policy "post-images select via post_images authenticated"
         )
     )
   );
+
+drop policy if exists "post-images select via post_images anon sfw" on storage.objects;
 
 create policy "post-images select via post_images anon sfw"
   on storage.objects for select

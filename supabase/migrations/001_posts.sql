@@ -10,10 +10,14 @@ create index if not exists posts_created_at_idx on public.posts (created_at desc
 
 alter table public.posts enable row level security;
 
+drop policy if exists "Authenticated users can read posts" on public.posts;
+
 create policy "Authenticated users can read posts"
   on public.posts for select
   to authenticated
   using (true);
+
+drop policy if exists "Users insert own posts" on public.posts;
 
 create policy "Users insert own posts"
   on public.posts for insert
