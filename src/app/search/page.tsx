@@ -1,7 +1,8 @@
 import React, { Suspense } from "react";
 import type { Metadata } from "next";
 import SearchClient from "../../../components/SearchClient";
-import { fetchSearchPosts, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
+import { fetchSearchPostsWithTwoTokenFallback, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
+import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 import type { FeedPost } from "@/types/post";
 
@@ -29,15 +30,21 @@ export default async function SearchPage({ searchParams }: PageProps) {
   const supabase = createAnonServerClient();
   let initialPosts: FeedPost[] = [];
   let initialLoadError: string | null = null;
+  let initialUsers: SearchUserResult[] = [];
 
   if (supabase && hasQuery) {
-    const { data, error } = await fetchSearchPosts(supabase, {
-      contentSubstring: q || null,
+    const postPromise = fetchSearchPostsWithTwoTokenFallback(supabase, {
+      rawQ: q,
       tagsAny: tagsList,
       viewerUserId: null,
     });
-    initialPosts = data ?? [];
-    initialLoadError = error?.message ?? null;
+    const userPromise = q.length > 0 ? fetchSearchUsers(supabase, q) : Promise.resolve({ data: [], error: null });
+
+    const [{ data: postsData, error: postsError }, { data: usersData }] = await Promise.all([postPromise, userPromise]);
+
+    initialPosts = postsData ?? [];
+    initialLoadError = postsError?.message ?? null;
+    initialUsers = usersData ?? [];
   }
 
   return (
@@ -52,7 +59,11 @@ export default async function SearchPage({ searchParams }: PageProps) {
               </p>
             }
           >
-            <SearchClient initialPosts={initialPosts ?? []} initialLoadError={initialLoadError} />
+            <SearchClient
+              initialPosts={initialPosts ?? []}
+              initialLoadError={initialLoadError}
+              initialUsers={initialUsers}
+            />
           </Suspense>
         </div>
       </section>

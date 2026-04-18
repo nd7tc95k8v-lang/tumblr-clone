@@ -21,6 +21,46 @@ export function formatPostTime(iso: string) {
   }
 }
 
+/** Scan-friendly relative / compact labels; full stamp for `title` / `aria-label` (see `formatPostTime`). */
+export function formatRelativePostTime(iso: string): { label: string; full: string } {
+  const full = formatPostTime(iso);
+  let d: Date;
+  try {
+    d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return { label: full, full };
+  } catch {
+    return { label: full, full };
+  }
+  const diffMs = Date.now() - d.getTime();
+  if (diffMs < 0) return { label: full, full };
+
+  const sec = Math.floor(diffMs / 1000);
+  if (sec < 45) return { label: "Just now", full };
+  if (sec < 90) return { label: "1m", full };
+  if (sec < 3600) return { label: `${Math.floor(sec / 60)}m`, full };
+  if (sec < 86400) return { label: `${Math.floor(sec / 3600)}h`, full };
+
+  const dayStartMs = (t: number) => {
+    const x = new Date(t);
+    x.setHours(0, 0, 0, 0);
+    return x.getTime();
+  };
+  const calendarDaysBehind = Math.round((dayStartMs(Date.now()) - dayStartMs(d.getTime())) / 86400000);
+  if (calendarDaysBehind === 1) {
+    return {
+      label: `Yesterday ${d.toLocaleTimeString(undefined, { timeStyle: "short" })}`,
+      full,
+    };
+  }
+  if (calendarDaysBehind >= 2 && calendarDaysBehind < 7) {
+    return {
+      label: d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
+      full,
+    };
+  }
+  return { label: full, full };
+}
+
 function authorUsername(row: FeedPost): string | null | undefined {
   return unwrapEmbed(row.author)?.username ?? undefined;
 }

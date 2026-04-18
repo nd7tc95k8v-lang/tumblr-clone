@@ -10,7 +10,7 @@ import type { FeedPost } from "@/types/post";
 import { coercePostTags, displayTagsForPost, parseCommaSeparatedTags } from "@/lib/tags";
 import {
   bodyFromPost,
-  formatPostTime,
+  formatRelativePostTime,
   hasQuoteReblogLayer,
   plainReblogAttributionProfile,
   plainReblogViaProfile,
@@ -29,49 +29,10 @@ import {
 } from "@/lib/post-content-guard";
 import { InlineErrorBanner } from "./InlineErrorBanner";
 import QuotedPostNest from "./QuotedPostNest";
+import PostNotesModal from "./PostNotesModal";
 import ReblogModal from "./ReblogModal";
 import { useActionGuard } from "./ActionGuardProvider";
 import { usePostLikeToggle } from "./usePostLikeToggle";
-
-/** Scan-friendly relative / compact labels; full stamp stays in `title` / `aria-label` via `formatPostTime`. */
-function postTimestampPresentation(iso: string): { label: string; full: string } {
-  const full = formatPostTime(iso);
-  let d: Date;
-  try {
-    d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return { label: full, full };
-  } catch {
-    return { label: full, full };
-  }
-  const diffMs = Date.now() - d.getTime();
-  if (diffMs < 0) return { label: full, full };
-
-  const sec = Math.floor(diffMs / 1000);
-  if (sec < 45) return { label: "Just now", full };
-  if (sec < 90) return { label: "1m", full };
-  if (sec < 3600) return { label: `${Math.floor(sec / 60)}m`, full };
-  if (sec < 86400) return { label: `${Math.floor(sec / 3600)}h`, full };
-
-  const dayStartMs = (t: number) => {
-    const x = new Date(t);
-    x.setHours(0, 0, 0, 0);
-    return x.getTime();
-  };
-  const calendarDaysBehind = Math.round((dayStartMs(Date.now()) - dayStartMs(d.getTime())) / 86400000);
-  if (calendarDaysBehind === 1) {
-    return {
-      label: `Yesterday ${d.toLocaleTimeString(undefined, { timeStyle: "short" })}`,
-      full,
-    };
-  }
-  if (calendarDaysBehind >= 2 && calendarDaysBehind < 7) {
-    return {
-      label: d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
-      full,
-    };
-  }
-  return { label: full, full };
-}
 
 const ICON_BOX = "h-4 w-4 shrink-0 transition-[transform,opacity] duration-200 ease-out";
 
@@ -353,6 +314,7 @@ export default function PostCard({
   const [mediaDragActive, setMediaDragActive] = useState(false);
   const [reblogCount, setReblogCount] = useState(() => Math.max(0, post.reblog_count));
   const [quoteChainExpanded, setQuoteChainExpanded] = useState(false);
+  const [notesModalOpen, setNotesModalOpen] = useState(false);
 
   const { liked, likeCount, likeBusy, likeError, dismissLikeError, toggleLike } = usePostLikeToggle({
     supabase,
@@ -781,7 +743,8 @@ export default function PostCard({
     onExpandChain: () => setQuoteChainExpanded(true),
   } as const;
 
-  const postTime = postTimestampPresentation(post.created_at);
+  const postTime = formatRelativePostTime(post.created_at);
+  const notesTriggerTotal = Math.max(0, likeCount) + Math.max(0, reblogCount);
 
   return (
     <article className="qrtz-card">
@@ -977,6 +940,20 @@ export default function PostCard({
                   </span>
                   <span className={STAT_COUNT_CLASS}>{reblogCount}</span>
                 </span>
+                <button
+                  type="button"
+                  disabled={!supabase}
+                  onClick={() => setNotesModalOpen(true)}
+                  className={`${REBLOG_ACTION_CLASS} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
+                  aria-haspopup="dialog"
+                  aria-expanded={notesModalOpen}
+                  aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
+                  title={!supabase ? "Notes unavailable" : undefined}
+                >
+                  <span className="tabular-nums">
+                    {notesTriggerTotal} {notesTriggerTotal === 1 ? "note" : "notes"}
+                  </span>
+                </button>
               </div>
               {showReblog ? (
                 <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 sm:ml-0.5">
@@ -1087,6 +1064,13 @@ export default function PostCard({
           </div>
         </div>
       </div>
+      <PostNotesModal
+        open={notesModalOpen}
+        onClose={() => setNotesModalOpen(false)}
+        supabase={supabase}
+        currentUserId={currentUserId}
+        threadRootPostId={threadRootPostId(post)}
+      />
       <ReblogModal
         post={reblogModalPost}
         busy={reblogModalBusy}

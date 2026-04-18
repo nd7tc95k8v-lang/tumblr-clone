@@ -11,16 +11,20 @@ import {
   followNormalizedTagForUser,
   unfollowNormalizedTagForUser,
 } from "@/lib/supabase/followed-tags";
-import { fetchSearchPosts, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
+import { fetchSearchPostsWithTwoTokenFallback, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
+import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
+import { getProfileLinkSlug } from "@/lib/username";
 import { reblogInsertFields } from "@/lib/reblog";
 import { normalizeTagSegment, parseCommaSeparatedTags } from "@/lib/tags";
 import type { FeedPost } from "@/types/post";
 import { useActionGuard } from "./ActionGuardProvider";
 import Feed from "./Feed";
+import ProfileAvatar from "./ProfileAvatar";
 
 type Props = {
   initialPosts: FeedPost[];
   initialLoadError: string | null;
+  initialUsers: SearchUserResult[];
 };
 
 /** Match PostCard tag chips: small bordered pills, not loud CTAs. */
@@ -40,7 +44,7 @@ function uniqueSortedTagsFromPosts(posts: FeedPost[]): string[] {
   return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
-export default function SearchClient({ initialPosts, initialLoadError }: Props) {
+export default function SearchClient({ initialPosts, initialLoadError, initialUsers }: Props) {
   const { runProtectedAction } = useActionGuard();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -57,6 +61,7 @@ export default function SearchClient({ initialPosts, initialLoadError }: Props) 
 
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
+  const [users, setUsers] = useState<SearchUserResult[]>(initialUsers);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(initialLoadError);
 
@@ -74,6 +79,10 @@ export default function SearchClient({ initialPosts, initialLoadError }: Props) 
   useEffect(() => {
     setPosts(initialPosts);
   }, [initialPosts]);
+
+  useEffect(() => {
+    setUsers(initialUsers);
+  }, [initialUsers]);
 
   useEffect(() => {
     setError(initialLoadError);
@@ -163,17 +172,34 @@ export default function SearchClient({ initialPosts, initialLoadError }: Props) 
     if (!supabase) return;
     if (!hasQuery) {
       setPosts([]);
+      setUsers([]);
       setError(null);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const { data, error: fetchError } = await fetchSearchPosts(supabase, {
-        contentSubstring: qFromUrl || null,
+      const postPromise = fetchSearchPostsWithTwoTokenFallback(supabase, {
+        rawQ: qFromUrl,
         tagsAny: tagsListFromUrl,
         viewerUserId: user?.id ?? null,
       });
+      const userText = qFromUrl.trim();
+      const userPromise =
+        userText.length > 0 ? fetchSearchUsers(supabase, qFromUrl) : Promise.resolve({ data: [], error: null });
+
+      const [{ data, error: fetchError }, { data: userRows, error: userFetchError }] = await Promise.all([
+        postPromise,
+        userPromise,
+      ]);
+
+      if (userFetchError) {
+        console.error(userFetchError);
+        setUsers([]);
+      } else {
+        setUsers(userRows ?? []);
+      }
+
       if (fetchError) {
         setError(fetchError.message);
         return;
@@ -399,6 +425,36 @@ export default function SearchClient({ initialPosts, initialLoadError }: Props) 
               to follow tags.
             </p>
           ) : null}
+        </div>
+      ) : null}
+
+      {hasQuery && qFromUrl.trim().length > 0 && users.length > 0 ? (
+        <div className="w-full max-w-3xl">
+          <p className="mb-2 text-meta font-medium text-text-secondary">Users</p>
+          <ul className="list-none divide-y divide-border/35 rounded-xl border border-border/50 bg-bg-secondary/15 p-0 dark:bg-bg-secondary/25">
+            {users.map((u) => {
+              const slug = getProfileLinkSlug(u.username);
+              if (!slug) return null;
+              const avatarLabel = u.display_name?.trim() || u.username;
+              const showName = Boolean(u.display_name?.trim());
+              return (
+                <li key={u.id}>
+                  <Link
+                    href={`/profile/${encodeURIComponent(slug)}`}
+                    className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-bg-secondary/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-border-focus/45"
+                  >
+                    <ProfileAvatar url={u.avatar_url} label={avatarLabel} size="md" className="shrink-0" />
+                    <div className="min-w-0 flex-1 text-left">
+                      <p className="truncate font-semibold text-text">@{u.username}</p>
+                      {showName ? (
+                        <p className="truncate text-meta text-text-secondary">{u.display_name}</p>
+                      ) : null}
+                    </div>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       ) : null}
 

@@ -1,7 +1,9 @@
-import React from "react";
+import React, { Suspense } from "react";
 import ExploreClient from "../../../components/ExploreClient";
+import { TrendingTagsSkeleton } from "../../../components/TrendingTags";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
+import ExploreTrendingTags from "./ExploreTrendingTags";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +27,9 @@ export default async function ExplorePage() {
       <h1 className="mb-2 text-3xl font-bold text-text md:text-4xl">Explore</h1>
       <section className="flex w-full justify-center">
         <div className="flex w-full max-w-4xl flex-col items-center gap-6">
+          <Suspense fallback={<TrendingTagsSkeleton />}>
+            <ExploreTrendingTags />
+          </Suspense>
           <ExploreClient initialPosts={data ?? []} initialLoadError={error?.message ?? null} />
         </div>
       </section>
