@@ -236,7 +236,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             +
           </span>
           <span
-            className={`max-w-full truncate px-0.5 text-[11px] font-semibold leading-none tracking-wide ${
+            className={`hidden max-w-full truncate px-0.5 text-[11px] font-semibold leading-none tracking-wide ${
               createActive ? "text-accent-aqua" : "text-text-muted"
             }`}
           >

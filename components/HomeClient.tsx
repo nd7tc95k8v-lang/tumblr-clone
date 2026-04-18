@@ -475,7 +475,7 @@ function ClientShell() {
             </div>
             <p className="text-text-secondary text-sm text-center">
               {homeFeedTab === "following"
-                ? "Posts from you and people you follow."
+                ? "Posts from people and tags you follow."
                 : "Public posts from everyone, newest first — same as the Explore page."}
             </p>
           </div>
