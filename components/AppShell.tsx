@@ -94,20 +94,22 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (typeof window === "undefined") return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let fadeStartTimer: ReturnType<typeof setTimeout>;
-    let unmountTimer: ReturnType<typeof setTimeout>;
+    let fadeStartTimer: number | null = null;
+    let unmountTimer: number | null = null;
 
     if (reduceMotion.matches) {
       unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_FADE_START_MS);
-      return () => window.clearTimeout(unmountTimer);
+      return () => {
+        if (unmountTimer !== null) window.clearTimeout(unmountTimer);
+      };
     }
 
     fadeStartTimer = window.setTimeout(() => setSplashFading(true), SPLASH_FADE_START_MS);
     unmountTimer = window.setTimeout(() => setSplashMounted(false), SPLASH_TOTAL_MS);
 
     return () => {
-      window.clearTimeout(fadeStartTimer);
-      window.clearTimeout(unmountTimer);
+      if (fadeStartTimer !== null) window.clearTimeout(fadeStartTimer);
+      if (unmountTimer !== null) window.clearTimeout(unmountTimer);
     };
   }, []);
 
