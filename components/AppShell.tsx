@@ -140,20 +140,42 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-full flex flex-col bg-bg">
-      <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
+      <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center gap-2 border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
+        <div className="min-w-0 flex-1">
+          <Link
+            href="/"
+            className="flex min-h-[2.25rem] min-w-0 max-w-full items-center gap-2 text-text transition-opacity hover:opacity-90 active:opacity-80"
+            aria-label={APP_NAME}
+          >
+            <img
+              src="/logo/qrtz-logo.svg"
+              alt=""
+              className="h-6 w-auto shrink-0"
+              width={112}
+              height={24}
+            />
+            <span className="min-w-0 truncate text-base font-semibold tracking-tight">{APP_NAME}</span>
+          </Link>
+        </div>
         <Link
-          href="/"
-          className="flex min-h-[2.25rem] min-w-0 max-w-full items-center gap-2 text-text transition-opacity hover:opacity-90 active:opacity-80"
-          aria-label={APP_NAME}
+          href="/search"
+          aria-label="Search"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/80 focus-visible:ring-offset-1 focus-visible:ring-offset-bg active:bg-bg-secondary/80"
         >
-          <img
-            src="/logo/qrtz-logo.svg"
-            alt=""
-            className="h-6 w-auto shrink-0"
-            width={112}
-            height={24}
-          />
-          <span className="min-w-0 truncate text-base font-semibold tracking-tight">{APP_NAME}</span>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="size-5"
+            aria-hidden
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.3-4.3" />
+          </svg>
         </Link>
       </header>
 
