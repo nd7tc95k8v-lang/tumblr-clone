@@ -155,7 +155,16 @@ type Props = {
   showReblog?: boolean;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
+  /** Stored normalized tags to highlight (e.g. active search filters). */
+  searchHighlightTags?: string[];
 };
+
+const TAG_CHIP_BASE =
+  "inline-block rounded-full border px-2 py-0.5 text-meta font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0";
+const TAG_CHIP_DEFAULT =
+  "border-border bg-bg-secondary text-text-secondary hover:border-accent-purple/45 hover:text-link";
+const TAG_CHIP_HIGHLIGHT =
+  "border-accent-purple/55 bg-accent-purple/15 text-text hover:border-accent-purple/70 hover:text-link";
 
 export default function PostCard({
   post,
@@ -164,6 +173,7 @@ export default function PostCard({
   showReblog = true,
   supabase,
   currentUserId,
+  searchHighlightTags,
 }: Props) {
   const [reblogModalPost, setReblogModalPost] = useState<FeedPost | null>(null);
   const [reblogModalBusy, setReblogModalBusy] = useState(false);
@@ -193,6 +203,8 @@ export default function PostCard({
   const plainResolved = resolvePlainReblogDisplay(post);
   const fallbackBody = bodyFromPost(post);
   const tags = displayTagsForPost(post);
+  const highlightSet =
+    searchHighlightTags && searchHighlightTags.length > 0 ? new Set(searchHighlightTags) : null;
   const commentary = post.reblog_commentary?.trim() || null;
   const quoteOuterMedia = quoteLayerOuterMedia(post);
   const showNestedQuote = Boolean(quoteLayer && post.quoted_post);
@@ -238,6 +250,17 @@ export default function PostCard({
               >
                 @{plainReblogVia.primary}
               </ProfileUsernameLink>
+            </p>
+          ) : null}
+          {post.homeFollowingMatchedTag ? (
+            <p className="mt-1.5 text-meta text-text-muted">
+              From tag you follow:{" "}
+              <Link
+                href={`/tag/${encodeURIComponent(post.homeFollowingMatchedTag)}`}
+                className="font-medium text-link/90 hover:text-link-hover hover:underline"
+              >
+                #{post.homeFollowingMatchedTag}
+              </Link>
             </p>
           ) : null}
           {quoteLayer && commentary ? (
@@ -325,7 +348,9 @@ export default function PostCard({
                 <li key={t}>
                   <Link
                     href={`/tag/${encodeURIComponent(t)}`}
-                    className="inline-block rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-meta font-medium text-text-secondary transition-colors hover:border-accent-purple/45 hover:text-link focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0"
+                    className={`${TAG_CHIP_BASE} ${
+                      highlightSet?.has(t) ? TAG_CHIP_HIGHLIGHT : TAG_CHIP_DEFAULT
+                    }`}
                   >
                     #{t}
                   </Link>

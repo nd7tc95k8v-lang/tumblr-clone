@@ -69,9 +69,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const { user, username, profileHref, refreshAuth } = useSupabaseSidebarAuth(supabase);
 
-  const items: NavItem[] = [
+  const sidebarItems: NavItem[] = [
     { href: "/", label: "Home", match: (p) => p === "/" },
     { href: "/explore", label: "Explore", match: (p) => p === "/explore" },
+    { href: "/search", label: "Search", match: (p) => p === "/search" },
     {
       href: profileHref,
       label: "Profile",
@@ -80,11 +81,19 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/settings", label: "Settings", match: (p) => p === "/settings" },
   ];
 
+  /** Bottom bar stays 5 slots (grid-cols-5); Search is desktop sidebar + direct URL. */
+  const mobileItems: NavItem[] = [
+    sidebarItems[0],
+    sidebarItems[1],
+    sidebarItems[3],
+    sidebarItems[4],
+  ];
+
   const createActive = pathname === "/compose";
 
   const sidebarNav = (
     <nav className="flex flex-col gap-0.5" aria-label="Main">
-      {items.map(({ href, label, match }) => (
+      {sidebarItems.map(({ href, label, match }) => (
         <Link key={label} href={href} className={match(pathname) ? `${linkBase} ${linkActive}` : linkBase}>
           {label}
         </Link>
@@ -181,7 +190,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         className="fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 items-stretch border-t border-border/40 bg-bg/90 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-10px_40px_-18px_rgba(0,0,0,0.08)] backdrop-blur-md md:hidden"
         aria-label="Mobile navigation"
       >
-        {items.slice(0, 2).map(({ href, label, match }) => (
+        {mobileItems.slice(0, 2).map(({ href, label, match }) => (
           <Link
             key={label}
             href={href}
@@ -212,7 +221,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             Post
           </span>
         </Link>
-        {items.slice(2).map(({ href, label, match }) => (
+        {mobileItems.slice(2).map(({ href, label, match }) => (
           <Link
             key={label}
             href={href}

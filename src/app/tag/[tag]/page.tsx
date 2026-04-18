@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import TagPageClient from "../../../../components/TagPageClient";
 import { tagFromRouteParam } from "@/lib/tags";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { countPostsWithTag } from "@/lib/supabase/fetch-search-posts";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 
 export const dynamic = "force-dynamic";
@@ -34,20 +35,30 @@ export default async function TagPage({ params }: PageProps) {
       <main className="flex min-h-screen flex-col items-center bg-bg px-4 py-10 md:px-6">
         <h1 className="mb-2 text-3xl font-bold text-text md:text-4xl">#{tag}</h1>
         <div className="flex w-full max-w-4xl flex-col items-center gap-6">
-          <TagPageClient tag={tag} initialPosts={[]} initialLoadError={null} />
+          <TagPageClient tag={tag} initialPosts={[]} initialLoadError={null} postCount={null} />
         </div>
       </main>
     );
   }
 
-  const { data, error } = await fetchFeedPosts(supabase, { filterTag: tag });
+  const [{ data, error }, countRes] = await Promise.all([
+    fetchFeedPosts(supabase, { filterTag: tag }),
+    countPostsWithTag(supabase, tag),
+  ]);
+
+  const postCount = countRes.error ? null : countRes.count;
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-bg px-4 py-10 md:px-6">
       <h1 className="mb-2 text-3xl font-bold text-text md:text-4xl">#{tag}</h1>
       <section className="flex w-full justify-center">
         <div className="flex w-full max-w-4xl flex-col items-center gap-6">
-          <TagPageClient tag={tag} initialPosts={data ?? []} initialLoadError={error?.message ?? null} />
+          <TagPageClient
+            tag={tag}
+            initialPosts={data ?? []}
+            initialLoadError={error?.message ?? null}
+            postCount={postCount}
+          />
         </div>
       </section>
     </main>

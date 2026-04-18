@@ -14,6 +14,11 @@ type Props = {
   showReblog?: boolean;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
+  /** Optional copy when there are no posts (e.g. search vs home). */
+  emptyTitle?: string;
+  emptyDescription?: string;
+  /** Normalized tag strings to emphasize on each card (e.g. search tag filters). */
+  postSearchHighlightTags?: string[];
 };
 
 const FEED_SKELETON_KEYS = ["feed-sk-0", "feed-sk-1", "feed-sk-2"] as const;
@@ -34,6 +39,9 @@ const Feed: React.FC<Props> = ({
   showReblog = true,
   supabase,
   currentUserId,
+  emptyTitle = "This feed is open",
+  emptyDescription = "Nothing is rolling through yet. Share a post and it will land here.",
+  postSearchHighlightTags,
 }) => {
   const [rebloggingId, setRebloggingId] = useState<string | null>(null);
   if (loading && posts.length === 0) {
@@ -92,10 +100,8 @@ const Feed: React.FC<Props> = ({
   if (posts.length === 0) {
     return (
       <div className={`${FEED_OUTER} rounded-xl border border-border/60 bg-bg-secondary/25 px-5 py-8 text-center`}>
-        <p className="text-sm font-medium text-text">This feed is open</p>
-        <p className="mt-2 text-sm leading-relaxed text-text-secondary">
-          Nothing is rolling through yet. Share a post and it will land here.
-        </p>
+        <p className="text-sm font-medium text-text">{emptyTitle}</p>
+        <p className="mt-2 text-sm leading-relaxed text-text-secondary">{emptyDescription}</p>
       </div>
     );
   }
@@ -111,6 +117,7 @@ const Feed: React.FC<Props> = ({
             showReblog={showReblog}
             supabase={supabase}
             currentUserId={currentUserId}
+            searchHighlightTags={postSearchHighlightTags}
             onReblog={async (p, commentary) => {
               setRebloggingId(p.id);
               try {

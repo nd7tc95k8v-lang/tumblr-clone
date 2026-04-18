@@ -10,6 +10,22 @@ import { coercePostTags } from "@/lib/tags";
 import type { EmbeddedPostWithAuthor, FeedPost } from "@/types/post";
 import { attachFeedPostEngagement } from "@/lib/supabase/feed-engagement";
 
+/** Merge “following” sources: followed-user posts + tag-matched posts, deduped by `id`, newest first. */
+export function mergeFollowingFeedSources(fromFollowedUsers: FeedPost[], fromFollowedTags: FeedPost[]): FeedPost[] {
+  const map = new Map<string, FeedPost>();
+  for (const p of fromFollowedUsers) {
+    map.set(p.id, p);
+  }
+  for (const p of fromFollowedTags) {
+    if (!map.has(p.id)) {
+      map.set(p.id, p);
+    }
+  }
+  return [...map.values()].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+}
+
 /** Feed list: post row + author only (no posts→posts embed). */
 export const POST_FEED_BASE_SELECT = `
   id,
@@ -47,12 +63,102 @@ type FeedRow = Omit<
 >;
 
 /** Raw row from PostgREST (`original_post_id` may be null on legacy rows). */
-type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw" | "post_images"> & {
+export type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw" | "post_images"> & {
   original_post_id?: string | null;
   is_nsfw?: boolean | null;
   nsfw_source?: string | null;
   post_images?: unknown;
 };
+
+/**
+ * Shared merge/hydration path for feed-shaped post rows (chain roots, quotes, engagement).
+ * Used by `fetchFeedPosts` and `fetchSearchPosts`.
+ */
+export async function hydrateFeedPostsFromQueryRows(
+  supabase: SupabaseClient,
+  rows: FeedQueryRow[] | null | undefined,
+  viewerUserId: string | null | undefined,
+): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
+  if (!rows?.length) {
+    return { data: [], error: null };
+  }
+
+  const feedRows: FeedRow[] = rows.map((r) => ({
+    ...r,
+    original_post_id: threadRootPostId(r),
+    is_nsfw: Boolean(r.is_nsfw),
+    post_images: coercePostImageRows(r.post_images),
+  }));
+  const feedById = new Map<string, FeedRow>(feedRows.map((r) => [r.id, r]));
+
+  const { byId: chainLookup } = await fetchReblogParentClosure(
+    supabase,
+    new Map(feedRows.map((r) => [r.id, feedRowToChainRow(r)])),
+    feedRows,
+  );
+
+  const originalIds = [
+    ...new Set(
+      feedRows
+        .map((r) => r.original_post_id)
+        .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
+    ),
+  ];
+
+  const map = new Map<string, EmbeddedPostWithAuthor>();
+  for (const rootId of originalIds) {
+    const local = feedById.get(rootId);
+    if (local) {
+      map.set(rootId, feedRowToEmbeddedOriginal(local));
+    }
+  }
+
+  const missingOriginalIds = originalIds.filter((id) => !map.has(id));
+
+  const stillMissingRoots: string[] = [];
+  for (const id of missingOriginalIds) {
+    const row = chainLookup.get(id);
+    if (row) {
+      map.set(id, chainRowToEmbedded(row));
+    } else {
+      stillMissingRoots.push(id);
+    }
+  }
+
+  if (stillMissingRoots.length > 0) {
+    const { data: originals, error: origError } = await supabase
+      .from("posts")
+      .select(POST_ORIGINAL_SELECT)
+      .in("id", stillMissingRoots);
+
+    if (origError) {
+      return { data: null, error: origError };
+    }
+
+    for (const o of originals ?? []) {
+      const row = o as EmbeddedPostWithAuthor & { post_images?: unknown };
+      map.set(row.id, {
+        ...row,
+        tags: coercePostTags(row.tags),
+        post_images: coercePostImageRows(row.post_images),
+      });
+    }
+  }
+
+  const merged: FeedPost[] = feedRows.map((row) => ({
+    ...row,
+    is_nsfw: Boolean(row.is_nsfw),
+    tags: coercePostTags(row.tags),
+    original_post: map.get(row.original_post_id) ?? null,
+    quoted_post: buildQuotedPostChain(row, chainLookup),
+    like_count: 0,
+    reblog_count: 0,
+    liked_by_me: false,
+  }));
+
+  const enriched = await attachFeedPostEngagement(supabase, merged, viewerUserId ?? null);
+  return { data: enriched, error: null };
+}
 
 function feedRowToEmbeddedOriginal(row: FeedRow): EmbeddedPostWithAuthor {
   return {
@@ -143,84 +249,30 @@ export async function fetchFeedPosts(
   if (error) {
     return { data: null, error };
   }
-  if (!rows?.length) {
+
+  return hydrateFeedPostsFromQueryRows(supabase, rows as FeedQueryRow[], options.viewerUserId ?? null);
+}
+
+/**
+ * Posts whose `tags` array overlaps any of the given normalized tag strings (same as search tag filter).
+ * Does not apply `filterUserIds` — callers merge with the followed-user feed in app code.
+ */
+export async function fetchFeedPostsForFollowedTagsOverlap(
+  supabase: SupabaseClient,
+  normalizedTags: string[],
+  viewerUserId: string | null,
+): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
+  if (normalizedTags.length === 0) {
     return { data: [], error: null };
   }
 
-  const feedRows: FeedRow[] = (rows as FeedQueryRow[]).map((r) => ({
-    ...r,
-    original_post_id: threadRootPostId(r),
-    is_nsfw: Boolean(r.is_nsfw),
-    post_images: coercePostImageRows(r.post_images),
-  }));
-  const feedById = new Map<string, FeedRow>(feedRows.map((r) => [r.id, r]));
+  let query = supabase.from("posts").select(POST_FEED_BASE_SELECT).order("created_at", { ascending: false });
+  query = query.overlaps("tags", normalizedTags);
 
-  const { byId: chainLookup } = await fetchReblogParentClosure(
-    supabase,
-    new Map(feedRows.map((r) => [r.id, feedRowToChainRow(r)])),
-    feedRows,
-  );
-
-  const originalIds = [
-    ...new Set(
-      feedRows
-        .map((r) => r.original_post_id)
-        .filter((id): id is string => typeof id === "string" && id.trim().length > 0),
-    ),
-  ];
-
-  const map = new Map<string, EmbeddedPostWithAuthor>();
-  for (const rootId of originalIds) {
-    const local = feedById.get(rootId);
-    if (local) {
-      map.set(rootId, feedRowToEmbeddedOriginal(local));
-    }
+  const { data: rows, error } = await query;
+  if (error) {
+    return { data: null, error };
   }
 
-  const missingOriginalIds = originalIds.filter((id) => !map.has(id));
-
-  const stillMissingRoots: string[] = [];
-  for (const id of missingOriginalIds) {
-    const row = chainLookup.get(id);
-    if (row) {
-      map.set(id, chainRowToEmbedded(row));
-    } else {
-      stillMissingRoots.push(id);
-    }
-  }
-
-  if (stillMissingRoots.length > 0) {
-    const { data: originals, error: origError } = await supabase
-      .from("posts")
-      .select(POST_ORIGINAL_SELECT)
-      .in("id", stillMissingRoots);
-
-    if (origError) {
-      return { data: null, error: origError };
-    }
-
-    for (const o of originals ?? []) {
-      const row = o as EmbeddedPostWithAuthor & { post_images?: unknown };
-      map.set(row.id, {
-        ...row,
-        tags: coercePostTags(row.tags),
-        post_images: coercePostImageRows(row.post_images),
-      });
-    }
-  }
-
-  const merged: FeedPost[] = feedRows.map((row) => ({
-    ...row,
-    is_nsfw: Boolean(row.is_nsfw),
-    tags: coercePostTags(row.tags),
-    original_post: map.get(row.original_post_id) ?? null,
-    quoted_post: buildQuotedPostChain(row, chainLookup),
-    like_count: 0,
-    reblog_count: 0,
-    liked_by_me: false,
-  }));
-
-  // Root-scoped like/reblog hydration (see `attachFeedPostEngagement` + 015_post_likes.sql RPCs).
-  const enriched = await attachFeedPostEngagement(supabase, merged, options.viewerUserId ?? null);
-  return { data: enriched, error: null };
+  return hydrateFeedPostsFromQueryRows(supabase, rows as FeedQueryRow[], viewerUserId ?? null);
 }

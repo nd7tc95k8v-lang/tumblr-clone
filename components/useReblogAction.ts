@@ -3,13 +3,20 @@
 import { useCallback } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
-import { reblogInsertFields } from "@/lib/reblog";
-import type { FeedPost } from "@/types/post";
+import { buildOptimisticReblogFeedPost, reblogInsertFields } from "@/lib/reblog";
+import type { FeedPost, PostAuthorEmbed } from "@/types/post";
 import { useActionGuard } from "./ActionGuardProvider";
 
 export type UseReblogActionOptions = {
   /** Runs after a successful insert (e.g. reload the feed). */
   onSuccess: () => void | Promise<void>;
+  /**
+   * Called after insert with a client-built {@link FeedPost} (same id as the row when using a client UUID).
+   * Use for optimistic feed updates; optional so other pages can ignore.
+   */
+  onOptimisticFeedPost?: (post: FeedPost) => void | Promise<void>;
+  /** Current user’s author embed for the optimistic row header. */
+  getViewerAuthor?: () => PostAuthorEmbed | null;
 };
 
 /**
@@ -18,7 +25,7 @@ export type UseReblogActionOptions = {
  */
 export function useReblogAction(
   supabase: SupabaseClient | null,
-  { onSuccess }: UseReblogActionOptions,
+  { onSuccess, onOptimisticFeedPost, getViewerAuthor }: UseReblogActionOptions,
 ): (original: FeedPost, commentary?: string | null) => Promise<boolean> {
   const { runProtectedAction } = useActionGuard();
 
@@ -36,7 +43,9 @@ export function useReblogAction(
 
       let succeeded = false;
       await runProtectedAction(supabase, { kind: "reblog" }, async () => {
+        const newPostId = crypto.randomUUID();
         const { error } = await supabase.from("posts").insert({
+          id: newPostId,
           user_id: user.id,
           ...reblogInsertFields(original, { commentary }),
         });
@@ -46,10 +55,18 @@ export function useReblogAction(
           return;
         }
         succeeded = true;
+        const optimistic = buildOptimisticReblogFeedPost({
+          newId: newPostId,
+          viewerUserId: user.id,
+          viewerAuthor: getViewerAuthor?.() ?? null,
+          source: original,
+          commentary,
+        });
+        await onOptimisticFeedPost?.(optimistic);
         await onSuccess();
       });
       return succeeded;
     },
-    [supabase, onSuccess, runProtectedAction],
+    [supabase, onSuccess, onOptimisticFeedPost, getViewerAuthor, runProtectedAction],
   );
 }

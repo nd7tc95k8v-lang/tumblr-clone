@@ -76,6 +76,11 @@ export type FeedPost = {
   liked_by_me: boolean;
   /** Normalized tag strings (lowercase, trimmed). */
   tags: string[];
+  /**
+   * Home → Following feed only: first followed tag that matches {@link displayTagsForPost} for transparency.
+   * Omitted elsewhere.
+   */
+  homeFollowingMatchedTag?: string;
   /** This post's author (posts.user_id → profiles). */
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
   /**
