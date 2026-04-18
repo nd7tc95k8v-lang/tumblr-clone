@@ -186,7 +186,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-full flex flex-col bg-bg">
       {splashMounted ? (
         <div
-          className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-bg px-6 md:hidden pointer-events-none transition-opacity ease-out ${
+          className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-bg px-6 md:hidden pointer-events-none transition-opacity ease-out ${
             splashFading ? "opacity-0" : "opacity-100"
           }`}
           style={{ transitionDuration: `${SPLASH_FADE_DURATION_MS}ms` }}
@@ -195,11 +195,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <img
             src="/logo/qrtz-logo.svg"
             alt=""
-            className="h-9 w-auto shrink-0"
-            width={126}
-            height={36}
+            className="h-14 w-auto shrink-0 md:h-16"
+            width={196}
+            height={56}
           />
-          <p className="max-w-[min(280px,100vw-3rem)] text-center text-[13px] leading-snug text-text-muted">{slogan}</p>
+          <p className="max-w-[min(320px,100vw-3rem)] text-center text-base font-medium leading-snug text-text-muted md:text-lg">
+            {slogan}
+          </p>
         </div>
       ) : null}
       <header className="sticky top-0 z-30 flex min-h-[calc(2.75rem+env(safe-area-inset-top,0px))] min-w-0 shrink-0 items-center gap-2 border-b border-border/40 bg-bg/90 px-3 pt-[env(safe-area-inset-top,0px)] backdrop-blur-md md:hidden">
