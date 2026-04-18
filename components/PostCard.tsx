@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ALLOWED_IMAGE_MIME_TYPES, validateImageFile } from "@/lib/image-upload-validation";
+import { coercePostImageRows } from "@/lib/post-images";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
-import { displayTagsForPost } from "@/lib/tags";
+import { coercePostTags, displayTagsForPost, parseCommaSeparatedTags } from "@/lib/tags";
 import {
   bodyFromPost,
   formatPostTime,
@@ -28,6 +30,7 @@ import {
 import { InlineErrorBanner } from "./InlineErrorBanner";
 import QuotedPostNest from "./QuotedPostNest";
 import ReblogModal from "./ReblogModal";
+import { useActionGuard } from "./ActionGuardProvider";
 import { usePostLikeToggle } from "./usePostLikeToggle";
 
 /** Scan-friendly relative / compact labels; full stamp stays in `title` / `aria-label` via `formatPostTime`. */
@@ -157,6 +160,10 @@ type Props = {
   currentUserId: string | null;
   /** Stored normalized tags to highlight (e.g. active search filters). */
   searchHighlightTags?: string[];
+  /** Called after the viewer successfully deletes this post (e.g. refetch feed). */
+  onPostDeleted?: () => void | Promise<void>;
+  /** Called after the viewer successfully updates tags on their post (e.g. refetch feed). */
+  onPostUpdated?: () => void | Promise<void>;
 };
 
 const TAG_CHIP_BASE =
@@ -166,6 +173,154 @@ const TAG_CHIP_DEFAULT =
 const TAG_CHIP_HIGHLIGHT =
   "border-accent-purple/55 bg-accent-purple/15 text-text hover:border-accent-purple/70 hover:text-link";
 
+const MAX_POST_IMAGES = 10;
+const ACCEPT_IMAGE_ATTR = ALLOWED_IMAGE_MIME_TYPES.join(",");
+
+type MediaSlot =
+  | { kind: "row"; rowId: string; path: string; position: number }
+  | { kind: "legacy"; path: string };
+
+function errorMessageFromUnknown(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    const m = err.message.trim();
+    if (m) return m;
+  }
+  if (err && typeof err === "object" && "message" in err) {
+    const m = String((err as { message?: unknown }).message).trim();
+    if (m) return m;
+  }
+  return fallback;
+}
+
+function buildMediaSlotsFromPost(post: FeedPost): MediaSlot[] {
+  const rows = coercePostImageRows(post.post_images);
+  if (rows?.length) {
+    return rows.map((r) => ({
+      kind: "row" as const,
+      rowId: r.id,
+      path: r.storage_path,
+      position: r.position,
+    }));
+  }
+  const leg = post.image_storage_path?.trim();
+  if (leg) return [{ kind: "legacy" as const, path: leg }];
+  return [];
+}
+
+async function collectStoragePathsToDelete(
+  supabase: SupabaseClient,
+  postId: string,
+  ownerId: string,
+  droppedPaths: string[],
+): Promise<string[]> {
+  const ownerPrefix = `${ownerId}/`;
+  const removable: string[] = [];
+  for (const path of droppedPaths) {
+    if (!path.startsWith(ownerPrefix)) continue;
+    const { count: piCount, error: c1 } = await supabase
+      .from("post_images")
+      .select("*", { count: "exact", head: true })
+      .eq("storage_path", path)
+      .neq("post_id", postId);
+    if (c1) throw c1;
+    const { count: postCount, error: c2 } = await supabase
+      .from("posts")
+      .select("*", { count: "exact", head: true })
+      .eq("image_storage_path", path)
+      .neq("id", postId);
+    if (c2) throw c2;
+    if ((piCount ?? 0) === 0 && (postCount ?? 0) === 0) removable.push(path);
+  }
+  return removable;
+}
+
+function MediaEditExistingThumb({
+  supabase,
+  path,
+  onRemove,
+  removeDisabled,
+}: {
+  supabase: SupabaseClient;
+  path: string;
+  onRemove: () => void;
+  removeDisabled?: boolean;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase.storage.from("post-images").createSignedUrl(path, 3600);
+      if (!cancelled && data?.signedUrl) setUrl(data.signedUrl);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, path]);
+
+  return (
+    <div className="relative aspect-square w-[4.5rem] shrink-0 overflow-hidden rounded-md border border-border/70 bg-bg-secondary ring-1 ring-black/[0.03] dark:ring-white/[0.04]">
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <div className="h-full w-full animate-pulse bg-bg-secondary" aria-hidden />
+      )}
+      <button
+        type="button"
+        disabled={removeDisabled}
+        onClick={onRemove}
+        onMouseDown={(e) => {
+          e.preventDefault();
+        }}
+        className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-40"
+        aria-label="Remove image"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+function MediaEditNewThumb({
+  file,
+  onRemove,
+  removeDisabled,
+}: {
+  file: File;
+  onRemove: () => void;
+  removeDisabled?: boolean;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+
+  return (
+    <div className="relative aspect-square w-[4.5rem] shrink-0 overflow-hidden rounded-md border border-border/70 bg-bg-secondary ring-1 ring-black/[0.03] dark:ring-white/[0.04]">
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <div className="h-full w-full animate-pulse bg-bg-secondary" aria-hidden />
+      )}
+      <button
+        type="button"
+        disabled={removeDisabled}
+        onClick={onRemove}
+        onMouseDown={(e) => {
+          e.preventDefault();
+        }}
+        className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-40"
+        aria-label="Remove image"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
 export default function PostCard({
   post,
   rebloggingId,
@@ -174,10 +329,28 @@ export default function PostCard({
   supabase,
   currentUserId,
   searchHighlightTags,
+  onPostDeleted,
+  onPostUpdated,
 }: Props) {
   const [reblogModalPost, setReblogModalPost] = useState<FeedPost | null>(null);
   const [reblogModalBusy, setReblogModalBusy] = useState(false);
   const [reblogModalError, setReblogModalError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [tagsEditOpen, setTagsEditOpen] = useState(false);
+  const [tagsDraft, setTagsDraft] = useState("");
+  const [tagsEditBusy, setTagsEditBusy] = useState(false);
+  const [tagsEditError, setTagsEditError] = useState<string | null>(null);
+  const [textEditOpen, setTextEditOpen] = useState(false);
+  const [textDraft, setTextDraft] = useState("");
+  const [textEditBusy, setTextEditBusy] = useState(false);
+  const [textEditError, setTextEditError] = useState<string | null>(null);
+  const [mediaEditOpen, setMediaEditOpen] = useState(false);
+  const [mediaEditBusy, setMediaEditBusy] = useState(false);
+  const [mediaEditError, setMediaEditError] = useState<string | null>(null);
+  const [mediaSlots, setMediaSlots] = useState<MediaSlot[]>([]);
+  const [mediaNewFiles, setMediaNewFiles] = useState<File[]>([]);
+  const [mediaDragActive, setMediaDragActive] = useState(false);
   const [reblogCount, setReblogCount] = useState(() => Math.max(0, post.reblog_count));
   const [quoteChainExpanded, setQuoteChainExpanded] = useState(false);
 
@@ -211,6 +384,396 @@ export default function PostCard({
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
   const plainReblogBy = plainReblogAttributionProfile(post);
   const plainReblogVia = plainReblogViaProfile(post);
+
+  const isOwner = Boolean(currentUserId && currentUserId === post.user_id);
+  const hasReblogParent = Boolean(post.reblog_of?.trim());
+  /** Originals + quote-layer rows only — not plain snapshot reblogs (text + photos). */
+  const canEditPostText = !hasReblogParent || hasQuoteReblogLayer(post);
+  const canEditPostMedia = canEditPostText;
+  const ownerMenuRef = useRef<HTMLDetailsElement>(null);
+  const mediaBaselinePathsRef = useRef<string[]>([]);
+  const mediaInitialRowIdsRef = useRef<Set<string>>(new Set());
+  const mediaFileInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+  const { runProtectedAction } = useActionGuard();
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const closeSiblingOwnerModals = useCallback((keep: "tags" | "text" | "media") => {
+    if (keep !== "tags") {
+      setTagsEditOpen(false);
+      setTagsEditError(null);
+    }
+    if (keep !== "text") {
+      setTextEditOpen(false);
+      setTextEditError(null);
+    }
+    if (keep !== "media") {
+      setMediaEditOpen(false);
+      setMediaEditError(null);
+      setMediaNewFiles([]);
+      setMediaDragActive(false);
+    }
+  }, []);
+
+  const handleOwnerDelete = useCallback(async () => {
+    if (!supabase) {
+      setDeleteError("Cannot delete while offline.");
+      return;
+    }
+    if (!confirm("Delete this post? This cannot be undone.")) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      const postId = post.id;
+      const ownerPrefix = `${post.user_id}/`;
+
+      const { data: piRows, error: piFetchErr } = await supabase
+        .from("post_images")
+        .select("storage_path")
+        .eq("post_id", postId);
+      if (piFetchErr) throw piFetchErr;
+
+      const pathSet = new Set<string>();
+      for (const r of piRows ?? []) {
+        const p = r.storage_path?.trim();
+        if (p) pathSet.add(p);
+      }
+      const legacy = post.image_storage_path?.trim();
+      if (legacy) pathSet.add(legacy);
+
+      const ownerPaths = [...pathSet].filter((p) => p.startsWith(ownerPrefix));
+
+      const removable: string[] = [];
+      for (const path of ownerPaths) {
+        const { count: piCount, error: c1 } = await supabase
+          .from("post_images")
+          .select("*", { count: "exact", head: true })
+          .eq("storage_path", path)
+          .neq("post_id", postId);
+        if (c1) throw c1;
+        const { count: postCount, error: c2 } = await supabase
+          .from("posts")
+          .select("*", { count: "exact", head: true })
+          .eq("image_storage_path", path)
+          .neq("id", postId);
+        if (c2) throw c2;
+        if ((piCount ?? 0) === 0 && (postCount ?? 0) === 0) {
+          removable.push(path);
+        }
+      }
+
+      const { error: delPostErr } = await supabase.from("posts").delete().eq("id", postId);
+      if (delPostErr) throw delPostErr;
+
+      ownerMenuRef.current?.removeAttribute("open");
+
+      if (removable.length > 0) {
+        const { error: rmErr } = await supabase.storage.from("post-images").remove(removable);
+        if (rmErr) console.error("Post delete: storage remove failed", rmErr);
+      }
+
+      await onPostDeleted?.();
+    } catch (err: unknown) {
+      if (mountedRef.current) {
+        setDeleteError(errorMessageFromUnknown(err, "Could not delete this post."));
+      }
+    } finally {
+      if (mountedRef.current) setDeleteBusy(false);
+    }
+  }, [post, supabase, onPostDeleted]);
+
+  const ownerActionBusy = deleteBusy || tagsEditBusy || textEditBusy || mediaEditBusy;
+
+  const handleOpenEditTags = useCallback(() => {
+    closeSiblingOwnerModals("tags");
+    ownerMenuRef.current?.removeAttribute("open");
+    setTagsDraft(coercePostTags(post.tags).join(", "));
+    setTagsEditError(null);
+    setTagsEditOpen(true);
+  }, [post.tags, closeSiblingOwnerModals]);
+
+  const handleSaveTags = useCallback(async () => {
+    if (!supabase) {
+      setTagsEditError("Cannot save while offline.");
+      return;
+    }
+    setTagsEditBusy(true);
+    setTagsEditError(null);
+    try {
+      const nextTags = parseCommaSeparatedTags(tagsDraft);
+      const { error } = await supabase.from("posts").update({ tags: nextTags }).eq("id", post.id);
+      if (error) throw error;
+      if (mountedRef.current) setTagsEditOpen(false);
+      await onPostUpdated?.();
+    } catch (err: unknown) {
+      if (mountedRef.current) {
+        setTagsEditError(errorMessageFromUnknown(err, "Could not save tags."));
+      }
+    } finally {
+      if (mountedRef.current) setTagsEditBusy(false);
+    }
+  }, [supabase, post.id, tagsDraft, onPostUpdated]);
+
+  const handleOpenEditText = useCallback(() => {
+    closeSiblingOwnerModals("text");
+    ownerMenuRef.current?.removeAttribute("open");
+    setTextDraft(
+      hasReblogParent ? (post.reblog_commentary ?? "") : post.content,
+    );
+    setTextEditError(null);
+    setTextEditOpen(true);
+  }, [hasReblogParent, post.content, post.reblog_commentary, closeSiblingOwnerModals]);
+
+  const handleSaveText = useCallback(async () => {
+    if (!supabase) {
+      setTextEditError("Cannot save while offline.");
+      return;
+    }
+    setTextEditBusy(true);
+    setTextEditError(null);
+    try {
+      if (hasReblogParent) {
+        const guard = validateUserWrittenContent(textDraft, { allowEmpty: true });
+        if (!guard.ok) {
+          setTextEditError(guard.message);
+          return;
+        }
+        const trimmed = textDraft.trim();
+        const { error } = await supabase
+          .from("posts")
+          .update({ reblog_commentary: trimmed.length > 0 ? trimmed : null })
+          .eq("id", post.id);
+        if (error) throw error;
+      } else {
+        const guard = validateUserWrittenContent(textDraft, { allowEmpty: false });
+        if (!guard.ok) {
+          setTextEditError(guard.message);
+          return;
+        }
+        const { error } = await supabase
+          .from("posts")
+          .update({ content: textDraft.trim() })
+          .eq("id", post.id);
+        if (error) throw error;
+      }
+      if (mountedRef.current) setTextEditOpen(false);
+      await onPostUpdated?.();
+    } catch (err: unknown) {
+      if (mountedRef.current) {
+        setTextEditError(errorMessageFromUnknown(err, "Could not save text."));
+      }
+    } finally {
+      if (mountedRef.current) setTextEditBusy(false);
+    }
+  }, [supabase, hasReblogParent, post.id, textDraft, onPostUpdated]);
+
+  const handleOpenEditMedia = useCallback(() => {
+    if (!supabase) return;
+    closeSiblingOwnerModals("media");
+    ownerMenuRef.current?.removeAttribute("open");
+    const slots = buildMediaSlotsFromPost(post);
+    setMediaSlots(slots);
+    setMediaNewFiles([]);
+    setMediaEditError(null);
+    mediaBaselinePathsRef.current = slots.map((s) => s.path);
+    mediaInitialRowIdsRef.current = new Set(
+      slots.filter((s): s is Extract<MediaSlot, { kind: "row" }> => s.kind === "row").map((s) => s.rowId),
+    );
+    setMediaEditOpen(true);
+  }, [post, supabase, closeSiblingOwnerModals]);
+
+  const addMediaFiles = useCallback(
+    (incoming: readonly File[]) => {
+      setMediaNewFiles((prev) => {
+        const next = [...prev];
+        let firstError: string | null = null;
+        for (const f of incoming) {
+          if (mediaSlots.length + next.length >= MAX_POST_IMAGES) break;
+          const img = validateImageFile(f);
+          if (!img.ok) {
+            if (!firstError) firstError = img.error;
+            continue;
+          }
+          next.push(f);
+        }
+        queueMicrotask(() => {
+          if (!mountedRef.current) return;
+          if (firstError) setMediaEditError(firstError);
+          else setMediaEditError(null);
+        });
+        return next;
+      });
+    },
+    [mediaSlots.length],
+  );
+
+  const handleSaveMedia = useCallback(async () => {
+    if (!supabase) {
+      setMediaEditError("Cannot save while offline.");
+      return;
+    }
+    setMediaEditBusy(true);
+    setMediaEditError(null);
+    let uploadedPathsForRollback: string[] = [];
+    let mediaDbPersisted = false;
+    try {
+      await runProtectedAction(supabase, { kind: "post" }, async () => {
+        uploadedPathsForRollback = [];
+        mediaDbPersisted = false;
+        const {
+          data: { user },
+          error: userErr,
+        } = await supabase.auth.getUser();
+        if (userErr || !user) throw new Error(userErr?.message?.trim() || "Not signed in.");
+        const ownerPrefix = `${user.id}/`;
+        const postId = post.id;
+        const baseline = mediaBaselinePathsRef.current;
+
+        const legacySlot = mediaSlots.find((s) => s.kind === "legacy");
+        if (legacySlot && mediaNewFiles.length > 0 && !legacySlot.path.startsWith(ownerPrefix)) {
+          throw new Error("Remove the copied image before adding new photos.");
+        }
+
+        if (mediaSlots.length + mediaNewFiles.length > MAX_POST_IMAGES) {
+          throw new Error(`You can have at most ${MAX_POST_IMAGES} images.`);
+        }
+
+        const keptRowIds = new Set(
+          mediaSlots.filter((s): s is Extract<MediaSlot, { kind: "row" }> => s.kind === "row").map((s) => s.rowId),
+        );
+        const removedRowIds = [...mediaInitialRowIdsRef.current].filter((id) => !keptRowIds.has(id));
+
+        const newPaths: string[] = [];
+        for (const f of mediaNewFiles) {
+          const v = validateImageFile(f);
+          if (!v.ok) throw new Error(v.error);
+          const rawExt = f.name.split(".").pop();
+          const fileExt =
+            rawExt && /^[a-z0-9]+$/i.test(rawExt) && rawExt.length <= 8 ? rawExt.toLowerCase() : "jpg";
+          const filePath = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
+          const { error: upErr } = await supabase.storage.from("post-images").upload(filePath, f, {
+            contentType: f.type || `image/${fileExt}`,
+            upsert: false,
+          });
+          if (upErr) throw upErr;
+          newPaths.push(filePath);
+          uploadedPathsForRollback.push(filePath);
+        }
+
+        const keptPathsOrdered = mediaSlots.map((s) => s.path);
+        const finalPaths = [...keptPathsOrdered, ...newPaths].slice(0, MAX_POST_IMAGES);
+        const dropped = baseline.filter((p) => !finalPaths.includes(p));
+
+        const removable = await collectStoragePathsToDelete(supabase, postId, user.id, dropped);
+
+        if (removedRowIds.length > 0) {
+          const { error: delE } = await supabase.from("post_images").delete().in("id", removedRowIds);
+          if (delE) throw delE;
+        }
+
+        if (removable.length > 0) {
+          const { error: rmE } = await supabase.storage.from("post-images").remove(removable);
+          if (rmE) console.error("Media edit: storage remove failed", rmE);
+        }
+
+        const rowSlots = mediaSlots.filter((s) => s.kind === "row");
+        const maxRowPos = rowSlots.length > 0 ? Math.max(...rowSlots.map((s) => s.position)) : -1;
+
+        const insertRows: { post_id: string; storage_path: string; position: number }[] = [];
+
+        if (
+          mediaSlots.length === 1 &&
+          mediaSlots[0].kind === "legacy" &&
+          mediaSlots[0].path.startsWith(ownerPrefix) &&
+          newPaths.length > 0
+        ) {
+          insertRows.push({
+            post_id: postId,
+            storage_path: mediaSlots[0].path,
+            position: 0,
+          });
+          newPaths.forEach((path, i) => {
+            insertRows.push({ post_id: postId, storage_path: path, position: 1 + i });
+          });
+        } else if (newPaths.length > 0) {
+          newPaths.forEach((path, i) => {
+            insertRows.push({
+              post_id: postId,
+              storage_path: path,
+              position: maxRowPos + 1 + i,
+            });
+          });
+        }
+
+        if (insertRows.length > 0) {
+          const { error: insE } = await supabase.from("post_images").insert(insertRows);
+          if (insE) throw insE;
+        }
+
+        const { error: upPostE } = await supabase
+          .from("posts")
+          .update({ image_storage_path: finalPaths[0] ?? null })
+          .eq("id", postId);
+        if (upPostE) throw upPostE;
+
+        mediaDbPersisted = true;
+        uploadedPathsForRollback = [];
+        if (mountedRef.current) {
+          setMediaEditOpen(false);
+          setMediaNewFiles([]);
+        }
+        await onPostUpdated?.();
+      });
+    } catch (err: unknown) {
+      if (!mediaDbPersisted && uploadedPathsForRollback.length > 0 && supabase) {
+        const { error: rbErr } = await supabase.storage.from("post-images").remove(uploadedPathsForRollback);
+        if (rbErr) console.error("Media edit: rollback orphan uploads failed", rbErr);
+      }
+      if (mountedRef.current) {
+        setMediaEditError(errorMessageFromUnknown(err, "Could not save photos."));
+      }
+    } finally {
+      if (mountedRef.current) setMediaEditBusy(false);
+    }
+  }, [supabase, post.id, mediaSlots, mediaNewFiles, runProtectedAction, onPostUpdated]);
+
+  useEffect(() => {
+    const anyOwnerModalOpen = tagsEditOpen || textEditOpen || mediaEditOpen;
+    const ownerModalBusy = tagsEditBusy || textEditBusy || mediaEditBusy;
+    if (!anyOwnerModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || ownerModalBusy) return;
+      if (tagsEditOpen) {
+        setTagsEditOpen(false);
+        setTagsEditError(null);
+      }
+      if (textEditOpen) {
+        setTextEditOpen(false);
+        setTextEditError(null);
+      }
+      if (mediaEditOpen) {
+        setMediaEditOpen(false);
+        setMediaEditError(null);
+        setMediaNewFiles([]);
+        setMediaDragActive(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [
+    tagsEditOpen,
+    textEditOpen,
+    mediaEditOpen,
+    tagsEditBusy,
+    textEditBusy,
+    mediaEditBusy,
+  ]);
 
   const quoteNestExpandProps = {
     maxVisibleDepth: QUOTE_NEST_MAX_INITIAL_DEPTH,
@@ -363,6 +926,11 @@ export default function PostCard({
             onDismiss={dismissLikeError}
             className="mt-2.5"
           />
+          <InlineErrorBanner
+            message={deleteError}
+            onDismiss={() => setDeleteError(null)}
+            className="mt-2.5"
+          />
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:gap-x-2.5">
               <time
                 dateTime={post.created_at}
@@ -454,6 +1022,68 @@ export default function PostCard({
                   </button>
                 </span>
               ) : null}
+              {isOwner ? (
+                <div className="ml-auto shrink-0">
+                  <details
+                    ref={ownerMenuRef}
+                    className={`group relative ${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}
+                  >
+                    <summary
+                      className={`${REBLOG_ACTION_CLASS} list-none [&::-webkit-details-marker]:hidden ${
+                        ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
+                      }`}
+                      aria-label="Post options"
+                      aria-busy={ownerActionBusy}
+                    >
+                      <span aria-hidden className="text-lg leading-none tracking-tight">
+                        ⋯
+                      </span>
+                    </summary>
+                    <div
+                      className="absolute right-0 top-full z-10 mt-1 min-w-[9.5rem] rounded-md border border-border/60 bg-bg-secondary py-1 shadow-md"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        disabled={ownerActionBusy || !supabase}
+                        className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                        onClick={handleOpenEditTags}
+                      >
+                        Edit tags
+                      </button>
+                      {canEditPostText ? (
+                        <button
+                          type="button"
+                          disabled={ownerActionBusy || !supabase}
+                          className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                          onClick={handleOpenEditText}
+                        >
+                          Edit text
+                        </button>
+                      ) : null}
+                      {canEditPostMedia ? (
+                        <button
+                          type="button"
+                          disabled={ownerActionBusy || !supabase}
+                          className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                          onClick={handleOpenEditMedia}
+                        >
+                          Edit photos
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={ownerActionBusy || !supabase}
+                        className="w-full px-3 py-1.5 text-left text-sm font-medium text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                        onClick={() => void handleOwnerDelete()}
+                      >
+                        {deleteBusy ? "Deleting…" : "Delete"}
+                      </button>
+                    </div>
+                  </details>
+                </div>
+              ) : null}
           </div>
         </div>
       </div>
@@ -488,6 +1118,278 @@ export default function PostCard({
           }
         }}
       />
+      {tagsEditOpen ? (
+        <div
+          className="qrtz-modal-overlay"
+          onClick={() => !tagsEditBusy && setTagsEditOpen(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-tags-title"
+            onClick={(e) => e.stopPropagation()}
+            className="qrtz-modal-panel max-w-md"
+          >
+            <h2 id="edit-tags-title" className="mb-2 font-heading text-lg font-semibold text-text">
+              Edit tags
+            </h2>
+            <p className="mb-2 text-meta text-text-muted">Comma-separated. Empty removes all tags on this post.</p>
+            <label htmlFor="edit-tags-input" className="mb-1 block text-meta font-medium text-text-secondary">
+              Tags
+            </label>
+            <input
+              id="edit-tags-input"
+              type="text"
+              value={tagsDraft}
+              onChange={(e) => {
+                setTagsDraft(e.target.value);
+                if (tagsEditError) setTagsEditError(null);
+              }}
+              disabled={tagsEditBusy}
+              className="qrtz-field mb-2 w-full py-2 text-sm"
+              placeholder="e.g. photo, weekend"
+              autoComplete="off"
+            />
+            <InlineErrorBanner
+              message={tagsEditError}
+              onDismiss={() => setTagsEditError(null)}
+              className="mb-3"
+            />
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={tagsEditBusy}
+                className="qrtz-btn-secondary px-3 py-1.5 text-sm"
+                onClick={() => {
+                  if (tagsEditBusy) return;
+                  setTagsEditOpen(false);
+                  setTagsEditError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={tagsEditBusy}
+                className="qrtz-btn-primary px-3 py-1.5 text-sm"
+                onClick={() => void handleSaveTags()}
+              >
+                {tagsEditBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {textEditOpen ? (
+        <div
+          className="qrtz-modal-overlay"
+          onClick={() => !textEditBusy && setTextEditOpen(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-text-title"
+            onClick={(e) => e.stopPropagation()}
+            className="qrtz-modal-panel max-w-md"
+          >
+            <h2 id="edit-text-title" className="mb-2 font-heading text-lg font-semibold text-text">
+              {hasReblogParent ? "Edit commentary" : "Edit post text"}
+            </h2>
+            <label htmlFor="edit-text-area" className="mb-1 block text-meta font-medium text-text-secondary">
+              {hasReblogParent ? "Commentary" : "Content"}
+            </label>
+            <textarea
+              id="edit-text-area"
+              value={textDraft}
+              onChange={(e) => {
+                setTextDraft(e.target.value);
+                if (textEditError) setTextEditError(null);
+              }}
+              disabled={textEditBusy}
+              rows={6}
+              className="qrtz-field mb-2 min-h-[120px] w-full resize-y py-2 text-sm leading-relaxed"
+              autoComplete="off"
+            />
+            <InlineErrorBanner
+              message={textEditError}
+              onDismiss={() => setTextEditError(null)}
+              className="mb-3"
+            />
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={textEditBusy}
+                className="qrtz-btn-secondary px-3 py-1.5 text-sm"
+                onClick={() => {
+                  if (textEditBusy) return;
+                  setTextEditOpen(false);
+                  setTextEditError(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={textEditBusy}
+                className="qrtz-btn-primary px-3 py-1.5 text-sm"
+                onClick={() => void handleSaveText()}
+              >
+                {textEditBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {mediaEditOpen && supabase ? (
+        <div
+          className="qrtz-modal-overlay"
+          onClick={() => !mediaEditBusy && setMediaEditOpen(false)}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-media-title"
+            onClick={(e) => e.stopPropagation()}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMediaDragActive(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMediaDragActive(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMediaDragActive(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setMediaDragActive(false);
+              if (mediaEditBusy) return;
+              const cap = MAX_POST_IMAGES - mediaSlots.length - mediaNewFiles.length;
+              if (cap <= 0) return;
+              addMediaFiles(Array.from(e.dataTransfer.files ?? []).slice(0, cap));
+            }}
+            className="qrtz-modal-panel max-w-md"
+          >
+            <h2 id="edit-media-title" className="mb-2 font-heading text-lg font-semibold text-text">
+              Edit photos
+            </h2>
+            <p className="mb-2 text-meta text-text-muted">
+              Up to {MAX_POST_IMAGES} images. Remove photos here or add new ones; inherited images from another blog must be
+              removed before you can add your own.
+            </p>
+            {mediaSlots.length > 0 || mediaNewFiles.length > 0 ? (
+              <ul className="mb-2 flex list-none flex-wrap gap-1.5 p-0">
+                {mediaSlots.map((slot, idx) => (
+                  <li
+                    key={slot.kind === "row" ? slot.rowId : `legacy-${slot.path}-${idx}`}
+                    className="contents"
+                  >
+                    <MediaEditExistingThumb
+                      supabase={supabase}
+                      path={slot.path}
+                      removeDisabled={mediaEditBusy}
+                      onRemove={() =>
+                        setMediaSlots((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                    />
+                  </li>
+                ))}
+                {mediaNewFiles.map((f, idx) => (
+                  <li key={`${f.name}-${idx}-${f.size}`} className="contents">
+                    <MediaEditNewThumb
+                      file={f}
+                      removeDisabled={mediaEditBusy}
+                      onRemove={() =>
+                        setMediaNewFiles((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mb-2 text-meta text-text-muted">No images on this post yet.</p>
+            )}
+            <input
+              ref={mediaFileInputRef}
+              type="file"
+              accept={ACCEPT_IMAGE_ATTR}
+              multiple
+              className="sr-only"
+              aria-label="Add images"
+              disabled={mediaEditBusy || mediaSlots.length + mediaNewFiles.length >= MAX_POST_IMAGES}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (!files.length) return;
+                const cap = MAX_POST_IMAGES - mediaSlots.length - mediaNewFiles.length;
+                addMediaFiles(files.slice(0, Math.max(0, cap)));
+              }}
+            />
+            <div
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (!mediaEditBusy && mediaSlots.length + mediaNewFiles.length < MAX_POST_IMAGES) {
+                    mediaFileInputRef.current?.click();
+                  }
+                }
+              }}
+              onClick={() => {
+                if (mediaEditBusy || mediaSlots.length + mediaNewFiles.length >= MAX_POST_IMAGES) return;
+                mediaFileInputRef.current?.click();
+              }}
+              className={`cursor-pointer rounded-lg border border-dashed px-3 py-2 text-center text-meta transition-colors ${
+                mediaDragActive ? "border-accent-aqua/50 bg-surface-blue/35" : "border-border/55 bg-bg-secondary/30"
+              } ${mediaEditBusy || mediaSlots.length + mediaNewFiles.length >= MAX_POST_IMAGES ? "pointer-events-none opacity-50" : ""}`}
+            >
+              {mediaSlots.length + mediaNewFiles.length >= MAX_POST_IMAGES ? (
+                <span className="text-text-muted">Maximum {MAX_POST_IMAGES} images.</span>
+              ) : (
+                <span className="text-text-secondary">Drop images here or click to add</span>
+              )}
+            </div>
+            <InlineErrorBanner
+              message={mediaEditError}
+              onDismiss={() => setMediaEditError(null)}
+              className="mb-3 mt-3"
+            />
+            <div className="flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                disabled={mediaEditBusy}
+                className="qrtz-btn-secondary px-3 py-1.5 text-sm"
+                onClick={() => {
+                  if (mediaEditBusy) return;
+                  setMediaEditOpen(false);
+                  setMediaEditError(null);
+                  setMediaNewFiles([]);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={mediaEditBusy}
+                className="qrtz-btn-primary px-3 py-1.5 text-sm"
+                onClick={() => void handleSaveMedia()}
+              >
+                {mediaEditBusy ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }

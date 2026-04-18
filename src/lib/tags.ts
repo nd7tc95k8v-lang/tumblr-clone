@@ -52,11 +52,7 @@ export function tagsForReblogFromSource(source: FeedPost): string[] {
   return coercePostTags(source.tags);
 }
 
+/** Tags shown on a feed card: always this row’s `posts.tags` (including reblogs after copy-on-create). */
 export function displayTagsForPost(post: FeedPost): string[] {
-  const reblogOf = post.reblog_of?.trim();
-  if (reblogOf && post.original_post) {
-    const fromRoot = coercePostTags(post.original_post.tags);
-    if (fromRoot.length > 0) return fromRoot;
-  }
   return coercePostTags(post.tags);
 }

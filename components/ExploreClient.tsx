@@ -124,6 +124,8 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
         showReblog={Boolean(user)}
         supabase={supabase}
         currentUserId={user?.id ?? null}
+        onPostDeleted={loadPosts}
+        onPostUpdated={loadPosts}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">

@@ -19,6 +19,10 @@ type Props = {
   emptyDescription?: string;
   /** Normalized tag strings to emphasize on each card (e.g. search tag filters). */
   postSearchHighlightTags?: string[];
+  /** Called after the viewer successfully deletes their own post (refetch / sync parent state). */
+  onPostDeleted?: () => void | Promise<void>;
+  /** Called after the viewer successfully updates their own post (e.g. tags). */
+  onPostUpdated?: () => void | Promise<void>;
 };
 
 const FEED_SKELETON_KEYS = ["feed-sk-0", "feed-sk-1", "feed-sk-2"] as const;
@@ -42,6 +46,8 @@ const Feed: React.FC<Props> = ({
   emptyTitle = "This feed is open",
   emptyDescription = "Nothing is rolling through yet. Share a post and it will land here.",
   postSearchHighlightTags,
+  onPostDeleted,
+  onPostUpdated,
 }) => {
   const [rebloggingId, setRebloggingId] = useState<string | null>(null);
   if (loading && posts.length === 0) {
@@ -126,6 +132,8 @@ const Feed: React.FC<Props> = ({
                 setRebloggingId(null);
               }
             }}
+            onPostDeleted={onPostDeleted}
+            onPostUpdated={onPostUpdated}
           />
         ))}
       </div>

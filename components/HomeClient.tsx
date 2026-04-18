@@ -526,6 +526,8 @@ function ClientShell() {
             showReblog
             supabase={supabase}
             currentUserId={user?.id ?? null}
+            onPostDeleted={loadPosts}
+            onPostUpdated={loadPosts}
           />
         </>
       ) : user ? (

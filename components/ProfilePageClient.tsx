@@ -306,6 +306,8 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               showReblog={showReblog}
               supabase={supabase}
               currentUserId={user?.id ?? null}
+              onPostDeleted={loadPosts}
+              onPostUpdated={loadPosts}
               onReblog={async (p, commentary) => {
                 setRebloggingId(p.id);
                 try {

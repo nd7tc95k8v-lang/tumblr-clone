@@ -77,7 +77,7 @@ export type FeedPost = {
   /** Normalized tag strings (lowercase, trimmed). */
   tags: string[];
   /**
-   * Home → Following feed only: first followed tag that matches {@link displayTagsForPost} for transparency.
+   * Home → Following feed only: first tag on this row (see {@link displayTagsForPost}) that matches a followed tag.
    * Omitted elsewhere.
    */
   homeFollowingMatchedTag?: string;
