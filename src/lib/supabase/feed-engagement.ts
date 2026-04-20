@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
+import { fetchReadonlyAnchorNoteCommentCountProbe } from "@/lib/supabase/readonly-anchor-note-comment-count-probe";
 
 /** Row shape from `public.post_like_counts` (likes keyed by `likes.post_id`). */
 type LikeCountRow = { post_id: string; like_count: number | string };
@@ -91,6 +92,62 @@ function applyThreadRootOriginalPostId(row: FeedPost): FeedPost {
   return { ...row, original_post_id: threadRoot };
 }
 
+const DEV_ANCHOR_NOTE_MISMATCH_LOG_CAP = 8;
+
+/** Avoid spamming dev consoles when migration 035 is not applied. */
+let devLoggedAnchorNoteCommentProbeUnsupported = false;
+
+/**
+ * Dev-only: attaches **`anchor_note_comment_count`** when the anchor probe succeeds; logs thread vs anchor
+ * mismatches. Returns the same rows unchanged if the probe is unsupported / errors. Production no-op caller.
+ */
+async function devAugmentAnchorNoteCommentCountsAndLog(
+  supabase: SupabaseClient,
+  mergedPosts: FeedPost[],
+): Promise<FeedPost[]> {
+  const probe = await fetchReadonlyAnchorNoteCommentCountProbe(supabase, mergedPosts);
+  if (probe.status === "unsupported") {
+    if (!devLoggedAnchorNoteCommentProbeUnsupported) {
+      devLoggedAnchorNoteCommentProbeUnsupported = true;
+      console.info("[feed-engagement] anchor note-comment probe unsupported (migration 035 / RPC); skipping diff.");
+    }
+    return mergedPosts;
+  }
+  if (probe.status === "rpc_error") {
+    return mergedPosts;
+  }
+
+  const byAnchor = probe.commentCountByAnchorPostId;
+  const augmented: FeedPost[] = mergedPosts.map((p) => {
+    const anchorId = p.card_engagement_owner_post_id?.trim() ?? "";
+    if (!anchorId) return { ...p };
+    const anchorN = byAnchor.get(anchorId) ?? 0;
+    return { ...p, anchor_note_comment_count: anchorN };
+  });
+
+  const mismatches: { postId: string; anchorId: string; thread: number; anchor: number }[] = [];
+  for (const p of augmented) {
+    const anchorId = p.card_engagement_owner_post_id?.trim() ?? "";
+    if (!anchorId) continue;
+    const thread = p.note_comment_count;
+    const anchor = p.anchor_note_comment_count ?? 0;
+    if (thread !== anchor) {
+      mismatches.push({ postId: p.id, anchorId, thread, anchor });
+    }
+  }
+  if (mismatches.length > 0) {
+    const shown = mismatches.slice(0, DEV_ANCHOR_NOTE_MISMATCH_LOG_CAP);
+    const more = mismatches.length - shown.length;
+    console.info(
+      `[feed-engagement] note_comment_count thread≠anchor: ${mismatches.length} row(s)`,
+      shown,
+      more > 0 ? `…+${more} more` : "",
+    );
+  }
+
+  return augmented;
+}
+
 /**
  * Merge like/reblog counts and `liked_by_me` for feed rows.
  *
@@ -178,7 +235,7 @@ export async function attachFeedPostEngagement(
     }
   }
 
-  return posts.map((p) => {
+  const merged = posts.map((p) => {
     const engagementLookupKey = engagementKeyForBatchAndMerge(p);
     const withEngagement = mergeEngagementCountsOntoPost(
       p,
@@ -190,4 +247,14 @@ export async function attachFeedPostEngagement(
     );
     return applyThreadRootOriginalPostId(withEngagement);
   });
+
+  if (process.env.NODE_ENV === "development" && merged.length > 0) {
+    try {
+      return await devAugmentAnchorNoteCommentCountsAndLog(supabase, merged);
+    } catch (e) {
+      console.warn("[feed-engagement] dev anchor note-comment augment skipped:", e);
+    }
+  }
+
+  return merged;
 }

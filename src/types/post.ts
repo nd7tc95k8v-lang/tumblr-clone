@@ -85,6 +85,12 @@ export type FeedPost = {
   reblog_count: number;
   /** Flat note comments on the thread root (`post_note_comments`). */
   note_comment_count: number;
+  /**
+   * Anchor-scoped flat note comment count (`note_anchor_post_id` / `post_note_comment_counts_by_anchor`).
+   * **Diagnostic / preparatory:** set only in development when the anchor RPC succeeds; omitted in production
+   * and when the probe is unsupported. **Not** used by shipped UI; `note_comment_count` stays thread-root.
+   */
+  anchor_note_comment_count?: number | null;
   /** True when the viewer liked the thread root (`post_ids_liked_by_auth_user` on root ids). */
   liked_by_me: boolean;
   /** Normalized tag strings (lowercase, trimmed). */

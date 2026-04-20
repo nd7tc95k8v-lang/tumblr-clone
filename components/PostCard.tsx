@@ -83,6 +83,25 @@ function RepostStatIcon({ className }: { className?: string }) {
   );
 }
 
+/** Leave-a-note entry (distinct from thread reblog / quote bubble). */
+function ShortNoteComposeIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <path d="M8 10h8M8 14h5" />
+    </svg>
+  );
+}
+
 /** Commentary / quote action (stroke weight matches RepostStatIcon). */
 function QuoteBubbleIcon({ className }: { className?: string }) {
   return (
@@ -426,6 +445,8 @@ export default function PostCard({
   const [noteCommentAdjust, setNoteCommentAdjust] = useState(0);
   const [quoteChainExpanded, setQuoteChainExpanded] = useState(false);
   const [notesModalOpen, setNotesModalOpen] = useState(false);
+  /** When opening via “Leave a note”, `PostNotesModal` focuses the composer after load. */
+  const [notesModalFocusComposer, setNotesModalFocusComposer] = useState(false);
   /** Per-card, session-only: reveal gated feed body/media after viewer opts in. */
   const [nsfwRevealed, setNsfwRevealed] = useState(false);
 
@@ -1139,7 +1160,28 @@ export default function PostCard({
                 <button
                   type="button"
                   disabled={!supabase}
-                  onClick={() => setNotesModalOpen(true)}
+                  onClick={() => {
+                    setNotesModalFocusComposer(true);
+                    setNotesModalOpen(true);
+                  }}
+                  className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
+                  aria-haspopup="dialog"
+                  aria-expanded={notesModalOpen}
+                  aria-label="Leave a short note on this thread"
+                  title={!supabase ? "Notes unavailable" : "Leave a short note — opens Notes with the composer ready"}
+                >
+                  <span className="inline-flex h-4 w-4 items-center justify-center text-text-secondary" aria-hidden>
+                    <ShortNoteComposeIcon className={ICON_BOX} />
+                  </span>
+                  <span className="hidden sm:inline">Note</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!supabase}
+                  onClick={() => {
+                    setNotesModalFocusComposer(false);
+                    setNotesModalOpen(true);
+                  }}
                   className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
                   aria-haspopup="dialog"
                   aria-expanded={notesModalOpen}
@@ -1281,16 +1323,35 @@ export default function PostCard({
                   </details>
                 </div>
               ) : null}
+              {process.env.NODE_ENV === "development" &&
+              typeof post.anchor_note_comment_count === "number" &&
+              post.anchor_note_comment_count !== post.note_comment_count ? (
+                <span
+                  className="basis-full text-[0.625rem] leading-tight text-text-muted/70 font-mono tabular-nums"
+                  title="Diagnostic: hydrated thread-root vs anchor-scoped note comment counts (development only)"
+                >
+                  dev: notes root {post.note_comment_count} / anchor {post.anchor_note_comment_count}
+                </span>
+              ) : null}
           </div>
         </div>
       </div>
-      {/* Shipped Notes: thread root only. A future per-card / authored-layer notes owner may differ from this id. */}
+      {/* Shipped Notes reads: thread root. Inserts also dual-write `note_anchor_post_id` when DB supports it. */}
       <PostNotesModal
         open={notesModalOpen}
-        onClose={() => setNotesModalOpen(false)}
+        onClose={() => {
+          setNotesModalOpen(false);
+          setNotesModalFocusComposer(false);
+        }}
+        focusComposerOnOpen={notesModalFocusComposer}
         supabase={supabase}
         currentUserId={currentUserId}
         threadRootPostId={threadRootPostId(post)}
+        notesAnchorPostId={post.card_engagement_owner_post_id}
+        prototypeAnchorScopedNotesComments={
+          process.env.NODE_ENV === "development" &&
+          process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1"
+        }
         onThreadNoteCountDelta={handleThreadNoteCountDelta}
       />
       <ReblogModal

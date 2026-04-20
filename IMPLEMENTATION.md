@@ -48,8 +48,9 @@ This document breaks work into **ordered phases**. Each phase lists **goals**, *
 
 ### Tasks
 
-1. **Single entry point**
-   - One primary control per card (e.g. “Notes”) opening a modal/drawer that explains totals **and** lists breakdowns.
+1. **Entry points (card footer)**
+   - **Notes** — primary control for the aggregated modal (totals + likes/reblogs/note list).
+   - **Note** (icon + label on `sm+`) — same `PostNotesModal`, opens with the short-note composer focused after load (`PostCard` → `focusComposerOnOpen`); storage and reads unchanged.
 
 2. **Data**
    - Consolidate existing RPCs / fetchers (`src/lib/supabase/fetch-post-notes.ts`, `028_post_notes_likes_list_rpc.sql`, engagement in `src/lib/supabase/feed-engagement.ts`) behind one Notes experience.
@@ -98,14 +99,144 @@ Ground rule: **`posts.original_post_id` is always the chain thread root** for ev
 
 **Internal prep (read-only, unwired):** `src/lib/supabase/readonly-card-owner-like-prototype.ts` exports `fetchReadonlyPrototypeCardOwnerLikeProbe` — batches `post_like_counts` + optional `post_ids_liked_by_auth_user` on distinct `card_engagement_owner_post_id` values for side-by-side comparison with thread-root hydration. It deliberately does **not** call `post_reblog_counts_by_root` or `post_note_comment_counts_by_root` on those ids, because that would imply parity that the RPC contracts do not provide.
 
+**Anchor note-comment count probe (read-only):** `src/lib/supabase/readonly-anchor-note-comment-count-probe.ts` exports **`fetchReadonlyAnchorNoteCommentCountProbe`** — calls **`post_note_comment_counts_by_anchor`** (migration **035**) over distinct `card_engagement_owner_post_id` values. Returns **`status: "ok"`** with a map, **`"unsupported"`** when the RPC is absent, or **`"rpc_error"`**; never throws. **`attachFeedPostEngagement`** uses it **only in `NODE_ENV === "development"`** to attach **`anchor_note_comment_count`** on hydrated **`FeedPost`** rows when the probe succeeds, and to log compact **thread vs anchor** mismatches. **Production:** field omitted (no probe). **Shipped UI** still uses **`note_comment_count`** only. Unsupported RPC: **one** `console.info` per process.
+
+**Dev-only card label:** `PostCard` shows a tiny **`dev: notes root … / anchor …`** line in the footer/meta row **only in development** when **`anchor_note_comment_count`** is a number and **≠** **`note_comment_count`** — diagnostic only; stripped from production builds via `NODE_ENV` check.
+
+**Dev-only Notes modal indicator:** when **`NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`** and **`prototypeAnchorScopedNotesComments`**, `PostNotesModal` shows a mono line **`dev: note-comments — …`** (list/count path: thread-root default, anchor RPC, or anchor→thread fallback) from **`devCommentListSource` / `devCommentCountSource`** on fetch results — diagnostic only.
+
+**Dev-only comment subtotal comparison (summary card):** inside the Notes summary card, a compact line **`dev: comments root … / anchor …`** appears only in **`NODE_ENV === "development"`**, with the prototype env + modal prop on, when the totals fetch used the anchor count RPC and returned **`devThreadRootCommentCountForCompare`**, and that thread-root head count **differs** from the anchor subtotal. **Non-shipping:** shipped breakdown copy and totals math are unchanged; production builds omit this UI.
+
+### Prototype readiness — authored-layer comment reads (audit)
+
+This subsection is **decision-oriented**: it describes what the code does today and whether a **broader read-path rollout** (e.g. anchor-scoped comment reads in dev **without** an explicit env flag) is justified. **No runtime change** is implied by this text.
+
+#### Current capabilities
+
+- **Notes modal — comment list (dev opt-in):** With **`NODE_ENV === "development"`**, **`NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`**, non-empty **`notesAnchorPostId`**, and **`prototypeAnchorScopedNotesComments`** from the caller (`PostNotesModal` / `PostCard`), `fetchPostNotes` loads comments via **`post_note_comments_list_for_anchor`** (`fetch-post-notes.ts`).
+- **Notes modal — comment subtotal in totals (same gates):** `fetchPostNotesTotalCount` resolves the reply slice via **`post_note_comment_counts_by_anchor`**; **`total`** still sums likes + reblogs + that comment count (likes/reblogs remain thread-root RPCs).
+- **Notes modal — likes / reblogs:** Unchanged — **`post_likes_list_for_thread_root`**, root-scoped reblog query, thread-root keys on assembled `PostNote` rows (`fetch-post-notes.ts`).
+- **Feed hydration — shipped `note_comment_count`:** Still from **`post_note_comment_counts_by_root`** batched on **`threadRootPostId`** (`feed-engagement.ts` → `engagementKeyForBatchAndMerge`).
+- **Feed hydration — dev-only shadow field:** In development, after the shipped merge, **`fetchReadonlyAnchorNoteCommentCountProbe`** runs; on success, rows get **`anchor_note_comment_count`** from **`post_note_comment_counts_by_anchor`** keyed by **`card_engagement_owner_post_id`** (`readonly-anchor-note-comment-count-probe.ts`, `feed-engagement.ts`). Production never calls the probe.
+- **Comment inserts (modal):** **`thread_root_post_id`** is always set; **`note_anchor_post_id`** is dual-written when the anchor id is present and the column exists, with a retry path if the column is missing (`PostNotesModal.tsx`).
+
+#### Current limitations
+
+- **Triple gate for anchor reads:** Env flag **and** `prototypeAnchorScopedNotesComments` **and** a non-empty anchor id; production paths short-circuit to thread-only (`wantsPrototypeAnchorComments*` in `fetch-post-notes.ts`).
+- **No anchor comment list/count on the feed card** beyond the optional **`anchor_note_comment_count`** diagnostic field; UI still labels and uses **`note_comment_count`** for shipped counts.
+- **Mixed semantics in the Notes modal** when the prototype is on: likes/reblogs are thread-wide; comments are anchor-scoped — by design for the experiment, not a finished “one social object” model.
+- **Historical rows:** Anchor RPCs only see rows with **`note_anchor_post_id`** populated as the RPC defines; pre-migration / pre–dual-write comments remain thread-visible but may be **absent or undercounted** on anchor reads until data is aligned (product + migration policy).
+
+#### Fallback when migration 035 / RPCs are missing
+
+- **`post_note_comments_list_for_anchor`** missing or “not found”:** comment list falls back to the **thread-root** `post_note_comments` query; dev **`devCommentListSource`:** **`anchor_fallback_thread_root`**; one **`console.info`** per process (`fetch-post-notes.ts`).
+- **`post_note_comment_counts_by_anchor`** missing:** comment count for totals falls back to **thread-root head count**; **`devCommentCountSource`:** **`anchor_fallback_thread_root`**; one **`console.info`** per process.
+- **Hard RPC errors** (not classified as “missing”): list path surfaces an error to the modal; count path returns **`comment_count: 0`** with an error message (caller shows failure) — see `resolveCommentCountForTotals` return on non-missing errors.
+- **Feed probe:** **`unsupported`** → no **`anchor_note_comment_count`**, one **`console.info`** per process; **`rpc_error`** → unchanged rows, error logged (`readonly-anchor-note-comment-count-probe.ts`, `feed-engagement.ts`).
+
+#### Diagnostics (dev-only; not criteria for shipping)
+
+- **`devCommentListSource` / `devCommentCountSource`** on fetch results; modal mono line **`dev: note-comments — …`** (`PostNotesModal.tsx`).
+- **Summary card line** **`dev: comments root … / anchor …`** when anchor count RPC succeeded and differs from thread-root compare count.
+- **`PostCard`** footer **`dev: notes root … / anchor …`** when probe counts disagree.
+- **`[feed-engagement]`** capped **`console.info`** for thread≠anchor mismatches; **`console.debug`** reblog batch diagnostics.
+
+#### Remaining blockers before defaulting anchor comment reads in development (no env flag)
+
+**Product / semantics**
+
+- **Single-number story:** Feed and shipped UI still advertise **thread-root** reply counts; turning on anchor reads globally in dev without also surfacing or reconciling that story will confuse anyone comparing card vs modal vs list.
+- **Mixed modal surface:** Until product accepts **thread likes/reblogs + anchor comments** as a coherent interim, or moves likes/reblogs to an authored-layer model, “default anchor comments” in dev is a **partial** Tumblr-style object.
+- **Data parity policy:** Explicit decision on **backfill**, **null `note_anchor_post_id`**, and acceptable **thread vs anchor** divergence during migration (the diagnostics exist because mismatch is expected until data + semantics converge).
+
+**Technical**
+
+- **035 everywhere:** All dev databases / preview envs used without the flag must expose **`post_note_comments_list_for_anchor`** and **`post_note_comment_counts_by_anchor`**; otherwise the app **silently** reverts to thread semantics for comments while the flag might imply otherwise.
+- **Caller contract:** `PostCard` (and any other entry) must pass a correct **`card_engagement_owner_post_id`** as **`notesAnchorPostId`** whenever anchor reads are default; empty/wrong anchor id already disables the prototype path.
+- **Split-failure edge case:** List and count are **two** RPCs; both have independent fallbacks — rare cases could theoretically diverge (list fallback, count anchor or vice versa) until unified error handling or a single backend read is introduced.
+- **Feed vs modal alignment:** Defaulting dev modal anchor reads without changing **`attachFeedPostEngagement`** batching means **feed `note_comment_count`** and **modal anchor comment total** can disagree by design — acceptable only if the team treats dev as explicitly **dual-read**.
+
+#### Go / no-go criteria for the next rollout step
+
+**Next step assumed:** Enable anchor-scoped **comment** list + count reads **by default in development** (remove reliance on **`NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE`**) while keeping production and shipped totals behavior unchanged.
+
+| Criterion | **Go** | **No-go** |
+|-----------|--------|-----------|
+| **Migration 035** | All target dev/staging DBs have anchor RPCs + **`note_anchor_post_id`**; smoke-tested list + count on real data. | Any shared dev DB lacks RPCs → silent thread fallback dominates. |
+| **Data policy** | Team signed off on **anchor-only visibility** for old rows (or backfill completed / feature flagged per-blog). | Anchor counts/lists routinely empty while thread has comments, with no documented expectation. |
+| **Semantics / UX** | Mixed thread likes + anchor comments in the modal is **documented and accepted** for dev; or companion change clarifies counts (copy or secondary label) **without** changing shipped prod. | Stakeholders expect card count ≡ modal reply count without eng explaining thread vs anchor. |
+| **Operational** | Developers know to use **`devComment*Source`** + summary/card diagnostics to spot fallback (`anchor_fallback_thread_root`) and RPC errors. | No one monitors logs; fallbacks go unnoticed. |
+| **Regression safety** | **`NODE_ENV === "production"`** paths remain thread-only (code review gate on `wantsPrototype*`). | Any change that runs anchor RPCs or changes **`note_comment_count`** merge keys in production without an explicit product release. |
+
+**Recommendation (today):** **No-go** for removing the env flag until 035 is universal on dev data, mismatch/fallback is understood, and product accepts **thread vs authored-layer** dual numbers (or schedules feed/modal alignment). The prototype is **fit for continued opt-in validation**, not for silent default-on in dev.
+
+### Planned DB / RPC expansion — authored-layer Notes (design only)
+
+> **Backward compatibility:** keep **`thread_root_post_id`** and all existing **thread-root RPCs** (`post_reblog_counts_by_root`, `post_note_comment_counts_by_root`, `post_likes_list_for_thread_root`, `post_like_counts`, etc.) **unchanged** in meaning and signatures. Add **nullable columns** and **new** RPC names only until product and app explicitly switch reads/writes.
+
+#### 1. Minimum schema additions (additive)
+
+| Change | Purpose |
+|--------|---------|
+| **`post_note_comments.note_anchor_post_id`** — `uuid` **nullable**, `references public.posts (id) on delete set null`, indexed | **Authored-layer / card-owner anchor** for “this note comment belongs to this visible social object,” aligned with app `noteOwnerPostIdForCard` / `FeedPost.card_engagement_owner_post_id`. **Why keep `thread_root_post_id`:** chain-wide visibility, existing RLS shape, existing `post_note_comment_counts_by_root`, and migration-era dual-read (thread vs anchor) without dropping data. **Why one extra column is enough:** flat comments only need (a) which **thread** they belong to for moderation/NSFW inheritance and (b) which **post row** they surface under in the UI; two ids cover that without a new table. |
+| **Optional later (not required for first Notes ship):** check constraint or trigger enforcing `note_anchor_post_id` lies on the same reblog chain as `thread_root_post_id` | Reduces garbage anchors; defer until chain-resolution helpers exist in SQL or app validates strictly. |
+
+**No change** to `posts` columns for reblog graph: **`reblog_of`** already supports per-parent immediate children; new RPCs read it.
+
+#### 2. Recommended new RPCs (additive; preserve old ones)
+
+| RPC | Role | Notes |
+|-----|------|--------|
+| **`post_reblog_counts_by_immediate_parent(p_parent_post_ids uuid[])`** → `(parent_post_id, reblog_count)` | Batched **“reblogs whose `posts.reblog_of` is this anchor”** (one hop). | **Smallest** aggregation that matches “who hit reblog on *this* card row” for a given `posts.id`. **Not** the same as `post_reblog_counts_by_root` (which groups by **`original_post_id`** = thread root). If product later needs **full subtree** counts under an anchor, add a **separate** RPC (recursive CTE or precomputed closure) — do not overload this function. |
+| **`post_note_comment_counts_by_anchor(p_anchor_ids uuid[])`** → `(anchor_post_id, comment_count)` | Batched counts where **`note_anchor_post_id = anchor`** (ignore null anchors). | Feed / experiments can batch distinct `card_engagement_owner_post_id` values. **`post_note_comment_counts_by_root` stays** for thread-root-only paths. |
+| **`post_note_comments_list_for_anchor(p_anchor_post_id uuid, p_limit int)`** (optional but recommended) | Security-definer **list** of note rows for the Notes modal merge, keyed by anchor. | Mirrors **`post_likes_list_for_thread_root`** style: avoids relying on broad `post_note_comments` RLS + client filters when anchor-scoped lists ship. Cap `p_limit` like other Notes RPCs. |
+| **Likes list for arbitrary post id** | Per-anchor likes in the merged Notes stream. | **`post_likes_list_for_thread_root`** already filters `likes.post_id = p_root_post_id`; **no signature change required** — pass the **anchor** uuid once likes target that row. Optionally add a **wrapper alias** RPC with a neutral name later for clarity only. |
+| **Reblogs list for anchor** | Reblog rows for merge. | Today: client `.from('posts').eq('original_post_id', threadRoot)` in `fetch-post-notes.ts`. For anchor mode: `.eq('reblog_of', anchor)` (immediate children) **or** SD RPC **`post_immediate_reblogs_list_for_parent`** (drafted in `035_authored_layer_notes_schema_rpcs.sql`) if RLS / consistency requires it. |
+
+#### 3. RLS / indexes (implications)
+
+- **Index:** `(note_anchor_post_id, created_at desc)` on `post_note_comments` for counts + anchor-scoped lists.
+- **INSERT policy (`post_note_comments_insert_guarded`):** extend `with check` so when **`note_anchor_post_id` is not null**, **`exists (select 1 from posts where id = note_anchor_post_id)`** (same pattern as `thread_root_post_id`). Keeps anonymous inserts impossible; preserves human-check + rate limit.
+- **SELECT policy:** can remain **thread-root–based** in Phase A/B so legacy visibility is unchanged; tightening to also require anchor visibility (inner NSFW edge cases) is a **later** optional migration.
+- **Rate limit** `post_note_comment_insert_rate_ok`: still global per user; no change required for first version.
+
+#### 4. Phased migration (recommended)
+
+| Phase | Scope |
+|-------|--------|
+| **A — Additive schema + RPCs** | Land **`note_anchor_post_id`**, indexes, new RPCs, relaxed insert policy. **No app switch:** shipped code keeps writing/reading thread-only paths; new column stays **null** for new rows until Phase B (or backfill script). |
+| **B — Dual-write / dual-read** | App sets **`thread_root_post_id`** (unchanged) **and** **`note_anchor_post_id`** on insert (anchor = `noteOwnerPostIdForCard` or explicit modal prop). **Backfill** (one-shot SQL): `UPDATE post_note_comments SET note_anchor_post_id = thread_root_post_id WHERE note_anchor_post_id IS NULL` so anchor-scoped counts at the **thread root** match legacy “whole thread” comment totals until UI intentionally splits. Optional **dual-read** logging: compare `post_note_comment_counts_by_root` vs `post_note_comment_counts_by_anchor` + `post_reblog_counts_by_root` vs `post_reblog_counts_by_immediate_parent` in dev. |
+| **C — UI / API migration** | `fetch-post-notes.ts`, `PostNotesModal`, `feed-engagement.ts`, footers: switch queries to anchor where product locks semantics. Likes already per `post_id`; wire like list to anchor when like writes move. |
+| **D — Cleanup (optional, only if ever needed)** | Deprecate unused code paths; **do not drop** `thread_root_post_id` or old RPCs until analytics and notifications explicitly no longer depend on them. |
+
+#### 5. Draft SQL on disk
+
+See **`supabase/migrations/035_authored_layer_notes_schema_rpcs.sql`** — additive column, index, insert-policy tweak, and new count/list RPCs. **Not referenced by app code yet**; applying it changes the database only when you run migrations.
+
+#### 6. App wiring plan after migration 035
+
+**Current (shipped UI unchanged):** `PostNotesModal` receives **`threadRootPostId`** (thread-root Notes scope) and optional **`notesAnchorPostId`** (`FeedPost.card_engagement_owner_post_id` from `PostCard`). List/totals still use thread root only. **Comment inserts** dual-write **`note_anchor_post_id`** when `notesAnchorPostId` is non-empty; if the column is missing (migration 035 not applied), the insert **retries once** without `note_anchor_post_id` only when the error matches a missing-column pattern — other errors surface unchanged.
+
+| Kind | Location | After dual-write / anchor reads ship |
+|------|----------|--------------------------------------|
+| **Write — insert `note_anchor_post_id`** | `components/PostNotesModal.tsx` → `handleSubmitComment` | **Done:** dual-write when anchor prop set + DB has column; fallback when column absent (see above). |
+| **Write — delete** | `PostNotesModal.tsx` → `handleDeleteOwnComment` → `.delete().eq("id", commentId)` | Unchanged for anchor column (row delete). |
+| **Read — modal merged list** | `src/lib/supabase/fetch-post-notes.ts` → **`fetchPostNotes`** | **Comments:** replace or parallel `.from("post_note_comments").eq("thread_root_post_id", …)` with **`post_note_comments_list_for_anchor`** when anchor mode. **Reblogs:** replace `.from("posts").eq("original_post_id", …)` with **`post_immediate_reblogs_list_for_parent`** (or `.eq("reblog_of", anchor)` client query) when listing by anchor. **Likes:** keep **`post_likes_list_for_thread_root`** but pass **anchor** `post_id` once likes target that row. |
+| **Read — modal totals** | `fetch-post-notes.ts` → **`fetchPostNotesTotalCount`** | **Comment count:** swap head-count on `thread_root_post_id` for **`post_note_comment_counts_by_anchor`** (single-id batch) when anchor mode. **Reblog count:** add **`post_reblog_counts_by_immediate_parent`** for anchor vs today’s **`post_reblog_counts_by_root`** for thread. |
+| **Read — feed badge / hydration** | `src/lib/supabase/feed-engagement.ts` → **`attachFeedPostEngagement`** (`post_note_comment_counts_by_root` + merge `note_comment_count`) | Optional second RPC batch **`post_note_comment_counts_by_anchor`** keyed by `engagementKeyCardOwner` when feed should show per-card note totals; **`PostCard.tsx`** reads **`post.note_comment_count`** and **`onThreadNoteCountDelta`** naming may need a parallel adjustment when anchor counts diverge from thread. |
+| **Types / hydrate** | `src/types/post.ts` (`note_comment_count`), `fetch-feed-posts.ts`, `reblog.ts` | New optional field (e.g. anchor-only count) only if UI needs both thread and anchor during transition; otherwise overload **`note_comment_count`** only after reads switch. |
+
+**Data flow:** `PostCard` passes **`threadRootPostId(post)`** and **`post.card_engagement_owner_post_id`** as **`notesAnchorPostId`**. **`fetchPostNotes`** / totals still thread-only until a later change selects anchor-scoped reads.
+
 ### Code / RPC touchpoints for a later migration
 
-- **`src/lib/supabase/fetch-post-notes.ts`** + **`components/PostNotesModal.tsx`** — **Shipped:** entirely thread-root–scoped; modal still passes `threadRootPostId` only. **Prep seam:** explicit **`notesThreadRootQueryKey`** vs documented future per-card key; list merge in **`assembleMergedPostNotes`**. Later: second mode / new RPCs for “notes for this `post.id`” vs “notes for this thread.”
-- **`PostNotesModal` component boundary** — File-level scope comment, prop JSDoc on `threadRootPostId`, and **`shippedNotesModalThreadRootKey`** make the thread-root-only contract obvious at the UI boundary (no new props yet). Prepares a clean place to thread a future card/authored-layer notes owner id next to unchanged `threadRootPostId` semantics until migration.
-- **`src/lib/supabase/feed-engagement.ts`** — Only collects `threadRootPostId`; merges counts onto every row from that root. Per-card likes need a different id set and/or batched `post_like_counts` over many ids + mapping back to rows.
+- **`src/lib/supabase/fetch-post-notes.ts`** + **`components/PostNotesModal.tsx`** — **Default reads:** thread-root likes/reblogs/comments. **Dev opt-in:** set **`NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`** — `PostCard` passes **`prototypeAnchorScopedNotesComments`**; **`fetchPostNotes`** / **`fetchPostNotesTotalCount`** then use **`post_note_comments_list_for_anchor`** + **`post_note_comment_counts_by_anchor`** for **comments only** (missing RPC → thread fallback, one `console.info` each). Likes/reblogs stay thread-root. **Modal props:** `threadRootPostId` + **`notesAnchorPostId`**; inserts dual-write **`note_anchor_post_id`** when supported.
+- **`PostNotesModal` component boundary** — `threadRootPostId` remains the Notes list/total key; **`notesAnchorPostId`** is the authored-layer anchor for insert dual-write only until read paths migrate.
+- **`src/lib/supabase/feed-engagement.ts`** — Only collects `threadRootPostId`; merges counts onto every row from that root. **Dev:** sets optional **`anchor_note_comment_count`** + mismatch log when anchor RPC works. Per-card likes still need a different id set and/or batched `post_like_counts` over many ids + mapping back to rows.
 - **`src/lib/supabase/readonly-card-owner-like-prototype.ts`** — **Not shipped.** Read-only like (+ optional liked-id set) probe on `card_engagement_owner_post_id`; see audit table above.
+- **`src/lib/supabase/readonly-anchor-note-comment-count-probe.ts`** — `fetchReadonlyAnchorNoteCommentCountProbe` → `post_note_comment_counts_by_anchor` when migration **035** is present. **Dev-only consumer:** `attachFeedPostEngagement` mismatch logging; does not set feed fields.
 - **`src/lib/supabase/fetch-feed-posts.ts`** — Calls `attachFeedPostEngagement` after hydrate; unchanged contract until engagement changes.
-- **`components/PostCard.tsx`** — Like toggle `rootPostId`; footer totals read row fields from engagement; `PostNotesModal` receives `threadRootPostId(post)`.
+- **`components/PostCard.tsx`** — Like toggle `rootPostId`; footer totals read row fields from engagement; `PostNotesModal` receives `threadRootPostId(post)` and `notesAnchorPostId={post.card_engagement_owner_post_id}`.
 - **`components/usePostLikeToggle.ts`** — Must stay aligned with whatever id populates `liked_by_me`.
 - **SQL/RPCs** — `post_like_counts` / `post_ids_liked_by_auth_user` are already per-`post_id` lists; thread semantics are **which ids the app passes**. Root-named RPCs (`post_likes_list_for_thread_root`, `post_reblog_counts_by_root`, `post_note_comment_counts_by_root`) encode thread aggregation; per-reblog UX may need new functions or parameters (separate migration when allowed).
 

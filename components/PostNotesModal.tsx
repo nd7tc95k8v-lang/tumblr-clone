@@ -11,7 +11,11 @@ import {
   validateUserWrittenContent,
 } from "@/lib/post-content-guard";
 import { getProfileLinkSlug } from "@/lib/username";
-import { fetchPostNotes, fetchPostNotesTotalCount } from "@/lib/supabase/fetch-post-notes";
+import {
+  fetchPostNotes,
+  fetchPostNotesTotalCount,
+  type NotesModalDevCommentReadSource,
+} from "@/lib/supabase/fetch-post-notes";
 import type { PostNote, PostNoteKind } from "@/types/post-note";
 import { useActionGuard } from "./ActionGuardProvider";
 import { InlineErrorBanner } from "./InlineErrorBanner";
@@ -25,15 +29,30 @@ const NOTE_COMMENT_MAX_LEN = 500;
 // Notes modal scope (shipped vs future)
 // ---------------------------------------------------------------------------
 //
-// **Shipped:** this modal is **thread-root–scoped** only. The `threadRootPostId` prop is the chain root
-// used by `fetchPostNotes` / `fetchPostNotesTotalCount` and for `post_note_comments.thread_root_post_id`.
-//
-// **Future:** a per-card / authored-layer Notes anchor (e.g. `FeedPost.card_engagement_owner_post_id`) may
-// be passed alongside or instead — keep fetch + composer keys explicit when that lands.
+// **Shipped default reads:** thread-root likes/reblogs/comments (`fetchPostNotes` / `fetchPostNotesTotalCount`).
+// **Dev hybrid (opt-in):** `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1` + prop `prototypeAnchorScopedNotesComments`
+// — comment list + comment total use anchor RPCs; likes/reblogs stay thread-root. Diagnostic only.
+// **Inserts:** `thread_root_post_id` always; `note_anchor_post_id` dual-written when `notesAnchorPostId` is set
+// and migration 035 is applied (otherwise insert retries without the anchor column).
 
 /** Normalized thread-root id for all current Notes fetches and comment inserts (unchanged contract). */
 function shippedNotesModalThreadRootKey(raw: string): string {
   return raw?.trim() ?? "";
+}
+
+/** PostgREST / Postgres: column `note_anchor_post_id` not in schema yet (migration 035 not applied). */
+function isMissingNoteAnchorColumnError(err: { code?: string; message?: string } | null | undefined): boolean {
+  if (!err) return false;
+  const code = String(err.code ?? "");
+  if (code === "42703") return true;
+  const msg = (err.message ?? "").toLowerCase();
+  if (!msg.includes("note_anchor_post_id")) return false;
+  return (
+    msg.includes("does not exist") ||
+    msg.includes("schema cache") ||
+    msg.includes("could not find") ||
+    msg.includes("unknown column")
+  );
 }
 
 /** Compact follow control; primary for Follow, muted border for Following (matches profile intent, smaller). */
@@ -46,14 +65,29 @@ type Props = {
   supabase: SupabaseClient | null;
   currentUserId: string | null;
   /**
-   * **Shipped — thread root only:** chain root (`threadRootPostId(post)` on the card). Drives every Notes
-   * list/total fetch and new comment rows’ `thread_root_post_id`. Not the feed row id on reblogs unless
-   * this card *is* the root. Future authored-layer Notes may add a separate prop; this name stays
-   * explicit so callers are not tempted to pass `card_engagement_owner_post_id` here until supported.
+   * **Shipped — thread root:** chain root (`threadRootPostId(post)` on the card). Drives every Notes
+   * list/total fetch and `post_note_comments.thread_root_post_id` on insert. Not the feed row id on reblogs
+   * unless this card *is* the root.
    */
   threadRootPostId: string;
+  /**
+   * Authored-layer / card-owner post id (`FeedPost.card_engagement_owner_post_id` / `noteOwnerPostIdForCard`).
+   * When non-empty and DB supports it, comment inserts also set `note_anchor_post_id`.
+   */
+  notesAnchorPostId?: string | null;
+  /**
+   * **Default off.** With `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1` in development, enables anchor-scoped
+   * **comment** reads only (likes/reblogs unchanged). No production effect.
+   */
+  prototypeAnchorScopedNotesComments?: boolean;
   /** Thread-scoped: applied to the PostCard Notes badge (+1 / -1) without refetching the feed. */
   onThreadNoteCountDelta?: (delta: number) => void;
+  /**
+   * When true for an open session, focuses the “Add a short note” textarea after the initial notes load
+   * finishes (signed-in + supabase only). The **Notes** footer control leaves this unset/false so default
+   * behavior is unchanged.
+   */
+  focusComposerOnOpen?: boolean;
 };
 
 const DELETE_NOTE_BTN =
@@ -90,6 +124,12 @@ function groupHeading(key: "reblog" | "like" | "comment"): string {
   return "Notes & replies";
 }
 
+function devCommentReadSourceLabel(s: NotesModalDevCommentReadSource): string {
+  if (s === "thread_root_default") return "thread-root (default)";
+  if (s === "anchor_rpc") return "anchor RPC";
+  return "anchor→thread fallback";
+}
+
 function NotesLoadingSkeleton() {
   return (
     <div className="mb-4 space-y-3" role="status" aria-busy="true" aria-label="Loading notes">
@@ -112,9 +152,13 @@ export default function PostNotesModal({
   supabase,
   currentUserId,
   threadRootPostId,
+  notesAnchorPostId,
+  prototypeAnchorScopedNotesComments,
   onThreadNoteCountDelta,
+  focusComposerOnOpen = false,
 }: Props) {
   const { runProtectedAction } = useActionGuard();
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState<PostNote[]>([]);
@@ -131,6 +175,16 @@ export default function PostNotesModal({
   const [composerSubmitting, setComposerSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  /** Dev-only: last successful fetch comment read paths (list vs count). */
+  const [devCommentReadDiag, setDevCommentReadDiag] = useState<{
+    list: NotesModalDevCommentReadSource;
+    count: NotesModalDevCommentReadSource;
+  } | null>(null);
+  /** Dev-only: thread-root vs anchor comment subtotals when they differ (summary card). */
+  const [devCommentSubtotalCompare, setDevCommentSubtotalCompare] = useState<{
+    root: number;
+    anchor: number;
+  } | null>(null);
 
   const loadNotes = useCallback(
     async (opts?: { silent?: boolean; isCancelled?: () => boolean }) => {
@@ -158,13 +212,20 @@ export default function PostNotesModal({
         setReblogCount(null);
         setCommentCount(null);
         setFollowedIdSet(new Set());
+        setDevCommentReadDiag(null);
+        setDevCommentSubtotalCompare(null);
       }
 
       const notesPromise = fetchPostNotes(supabase, {
         threadRootPostId: notesThreadRootKey,
         limit: NOTES_FETCH_LIMIT,
+        notesAnchorPostId: notesAnchorPostId ?? undefined,
+        prototypeAnchorScopedComments: Boolean(prototypeAnchorScopedNotesComments),
       });
-      const totalsPromise = fetchPostNotesTotalCount(supabase, notesThreadRootKey);
+      const totalsPromise = fetchPostNotesTotalCount(supabase, notesThreadRootKey, {
+        notesAnchorPostId: notesAnchorPostId ?? undefined,
+        prototypeAnchorScopedComments: Boolean(prototypeAnchorScopedNotesComments),
+      });
       const followsPromise =
         currentUserId && currentUserId.trim().length > 0
           ? supabase.from("follows").select("following_id").eq("follower_id", currentUserId)
@@ -175,11 +236,15 @@ export default function PostNotesModal({
       if (isCancelled?.()) return;
 
       if (notesRes.error) {
+        setDevCommentReadDiag(null);
+        setDevCommentSubtotalCompare(null);
         setError(notesRes.error.message);
         if (!silent) setLoading(false);
         return;
       }
       if (totalsRes.error) {
+        setDevCommentReadDiag(null);
+        setDevCommentSubtotalCompare(null);
         setError(totalsRes.error.message);
         if (!silent) setLoading(false);
         return;
@@ -193,12 +258,33 @@ export default function PostNotesModal({
       setLikeCount(totalsRes.like_count);
       setReblogCount(totalsRes.reblog_count);
       setCommentCount(totalsRes.comment_count);
+      if (process.env.NODE_ENV === "development") {
+        setDevCommentReadDiag({
+          list: notesRes.devCommentListSource ?? "thread_root_default",
+          count: totalsRes.devCommentCountSource ?? "thread_root_default",
+        });
+        const devRoot = totalsRes.devThreadRootCommentCountForCompare;
+        const showSubtotalCompare =
+          process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1" &&
+          prototypeAnchorScopedNotesComments &&
+          totalsRes.devCommentCountSource === "anchor_rpc" &&
+          typeof devRoot === "number" &&
+          devRoot !== totalsRes.comment_count;
+        if (showSubtotalCompare) {
+          setDevCommentSubtotalCompare({ root: devRoot, anchor: totalsRes.comment_count });
+        } else {
+          setDevCommentSubtotalCompare(null);
+        }
+      } else {
+        setDevCommentReadDiag(null);
+        setDevCommentSubtotalCompare(null);
+      }
       if (!followsRes.error && Array.isArray(followsRes.data)) {
         setFollowedIdSet(new Set(followsRes.data.map((r) => r.following_id)));
       }
       if (!silent) setLoading(false);
     },
-    [supabase, threadRootPostId, currentUserId],
+    [supabase, threadRootPostId, currentUserId, notesAnchorPostId, prototypeAnchorScopedNotesComments],
   );
 
   useEffect(() => {
@@ -218,6 +304,8 @@ export default function PostNotesModal({
       setComposerSubmitting(false);
       setDeleteError(null);
       setDeletingCommentId(null);
+      setDevCommentReadDiag(null);
+      setDevCommentSubtotalCompare(null);
       return;
     }
 
@@ -228,6 +316,16 @@ export default function PostNotesModal({
       cancelled = true;
     };
   }, [open, loadNotes]);
+
+  useEffect(() => {
+    // Wait until summary totals exist so we are past the initial fetch reset (`total` cleared at load start)
+    // and the composer textarea is enabled (avoids a one-frame focus while `loading` is still stale).
+    if (!open || !focusComposerOnOpen || total === null || error || !currentUserId || !supabase) return;
+    const id = window.requestAnimationFrame(() => {
+      composerTextareaRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [open, focusComposerOnOpen, total, error, currentUserId, supabase]);
 
   const handleFollowToggle = useCallback(
     async (targetUserId: string, isFollowing: boolean) => {
@@ -300,11 +398,34 @@ export default function PostNotesModal({
     setComposerSubmitting(true);
     try {
       await runProtectedAction(supabase, { kind: "note_comment" }, async () => {
-        const { error: insErr } = await supabase.from("post_note_comments").insert({
+        const baseRow = {
           thread_root_post_id: notesThreadRootKey,
           user_id: currentUserId,
           body: trimmed,
-        });
+        };
+        const anchorKey = notesAnchorPostId?.trim() ?? "";
+
+        let insErr = null as { code?: string; message?: string } | null;
+        if (anchorKey.length > 0) {
+          const withAnchor = await supabase.from("post_note_comments").insert({
+            ...baseRow,
+            note_anchor_post_id: anchorKey,
+          });
+          insErr = withAnchor.error;
+          if (insErr && isMissingNoteAnchorColumnError(insErr)) {
+            if (process.env.NODE_ENV === "development") {
+              console.info(
+                "[PostNotesModal] note_anchor_post_id unavailable; retrying insert thread_root fields only.",
+              );
+            }
+            const fallback = await supabase.from("post_note_comments").insert(baseRow);
+            insErr = fallback.error;
+          }
+        } else {
+          const res = await supabase.from("post_note_comments").insert(baseRow);
+          insErr = res.error;
+        }
+
         if (insErr) {
           console.error(insErr);
           await alertIfLikelyRateOrGuardFailure(supabase, insErr, { kind: "note_comment" });
@@ -322,6 +443,7 @@ export default function PostNotesModal({
     supabase,
     currentUserId,
     threadRootPostId,
+    notesAnchorPostId,
     composerText,
     runProtectedAction,
     loadNotes,
@@ -415,7 +537,33 @@ export default function PostNotesModal({
         <div className="mb-3 rounded-card border border-border/60 bg-bg-secondary/25 px-3 py-2.5 dark:bg-bg-secondary/35">
           {summaryHeadline}
           {breakdown}
+          {process.env.NODE_ENV === "development" &&
+          process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1" &&
+          prototypeAnchorScopedNotesComments &&
+          devCommentSubtotalCompare ? (
+            <p
+              className="mt-1 text-[0.65rem] font-mono leading-tight text-text-muted/75"
+              title="Diagnostic: thread-root vs anchor note-comment subtotals (development only; not shipped UI)"
+            >
+              dev: comments root {devCommentSubtotalCompare.root} / anchor {devCommentSubtotalCompare.anchor}
+            </p>
+          ) : null}
         </div>
+
+        {process.env.NODE_ENV === "development" &&
+        process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1" &&
+        prototypeAnchorScopedNotesComments &&
+        devCommentReadDiag ? (
+          <p
+            className="mb-2 text-[0.65rem] leading-tight font-mono text-text-muted/80"
+            title="Diagnostic: note-comment list vs count query path (development only)"
+          >
+            dev: note-comments —{" "}
+            {devCommentReadDiag.list === devCommentReadDiag.count
+              ? devCommentReadSourceLabel(devCommentReadDiag.list)
+              : `list ${devCommentReadSourceLabel(devCommentReadDiag.list)} · count ${devCommentReadSourceLabel(devCommentReadDiag.count)}`}
+          </p>
+        ) : null}
 
         {error ? (
           <InlineErrorBanner message={error} onDismiss={() => setError(null)} className="mb-3" />
@@ -571,6 +719,7 @@ export default function PostNotesModal({
                 Add a short note
               </label>
               <textarea
+                ref={composerTextareaRef}
                 id="post-note-comment"
                 rows={2}
                 maxLength={NOTE_COMMENT_MAX_LEN}

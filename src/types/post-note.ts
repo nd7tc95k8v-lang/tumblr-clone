@@ -5,9 +5,10 @@ export type PostNoteKind = "like" | "reblog" | "comment";
  * `post_id` is the liked post id for likes (always the thread root), the reblog row id for reblogs,
  * or the thread root for comments.
  *
- * **Shipped modal scope:** `PostNotesModal` keys all fetches and new comments on the chain thread root
- * only (`threadRootPostId` prop). `root_post_id` matches that thread root today; a future per-card /
- * authored-layer Notes anchor may introduce a separate field or meaning without changing DB types yet.
+ * **Shipped modal scope:** `PostNotesModal` keys likes/reblogs and default comment reads on the chain thread
+ * root (`threadRootPostId`). Entry from the card: **Notes** (aggregate) or **Note** (same modal, optional
+ * composer focus via `focusComposerOnOpen`). **Dev opt-in:** anchor-scoped comment rows still use `post_id` /
+ * `root_post_id` = thread root in merged `PostNote` for now (hybrid prototype in `fetch-post-notes.ts`).
  */
 export type PostNote = {
   kind: PostNoteKind;
