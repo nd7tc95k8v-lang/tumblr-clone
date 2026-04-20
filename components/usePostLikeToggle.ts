@@ -6,7 +6,12 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export type UsePostLikeToggleParams = {
   supabase: SupabaseClient | null;
   currentUserId: string | null;
-  /** Thread root (`original_post_id`); likes row targets this post id. */
+  /**
+   * Thread root post id (`original_post_id` / chain root): `likes.post_id` must match this so the
+   * control stays consistent with feed `liked_by_me` and aggregate `like_count` (see
+   * `attachFeedPostEngagement` / `fetch-feed-posts`). A derived per-card helper `noteOwnerPostIdForCard`
+   * exists in `@/lib/feed-post-display` for future per-reblog Notes/engagement but is not used here yet.
+   */
   rootPostId: string;
   initialLiked: boolean;
   initialLikeCount: number;
@@ -23,6 +28,7 @@ export type UsePostLikeToggleResult = {
 
 /**
  * Optimistic like/unlike with in-flight guard, rollback on error, and non-negative counts.
+ * Shipped behavior: likes target the **thread root** passed as `rootPostId` (matches server hydration).
  */
 export function usePostLikeToggle({
   supabase,

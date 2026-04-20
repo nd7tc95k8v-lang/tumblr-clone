@@ -3,9 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { NormalizedPostImage } from "@/lib/post-images";
-
-const BUCKET = "post-images";
-const SIGNED_SEC = 3600;
+import { getCachedPostImageSignedUrl } from "@/lib/supabase/post-image-url-cache";
 
 type Props = {
   open: boolean;
@@ -13,9 +11,21 @@ type Props = {
   supabase: SupabaseClient | null;
   images: NormalizedPostImage[];
   initialIndex: number;
+  /**
+   * Latest signed URLs resolved by gallery thumbnails (path → url), so the lightbox can show
+   * immediately without waiting on another round-trip when the feed already loaded the same path.
+   */
+  prefetchedSignedUrlsRef?: React.MutableRefObject<Map<string, string>>;
 };
 
-export default function PostImageLightbox({ open, onClose, supabase, images, initialIndex }: Props) {
+export default function PostImageLightbox({
+  open,
+  onClose,
+  supabase,
+  images,
+  initialIndex,
+  prefetchedSignedUrlsRef,
+}: Props) {
   const [index, setIndex] = useState(initialIndex);
   const [resolved, setResolved] = useState<Map<number, string>>(new Map());
   const touchStartX = useRef<number | null>(null);
@@ -55,9 +65,12 @@ export default function PostImageLightbox({ open, onClose, supabase, images, ini
         if (!img) continue;
         let url: string | null = img.src?.trim() || null;
         const path = img.storagePath?.trim();
+        if (!url && path && prefetchedSignedUrlsRef?.current) {
+          url = prefetchedSignedUrlsRef.current.get(path) ?? null;
+        }
         if (!url && path && supabase) {
-          const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_SEC);
-          url = error || !data?.signedUrl ? null : data.signedUrl;
+          const r = await getCachedPostImageSignedUrl(supabase, path);
+          url = r.url;
         }
         if (cancelled || !url) continue;
         setResolved((prev) => {
@@ -71,7 +84,7 @@ export default function PostImageLightbox({ open, onClose, supabase, images, ini
     return () => {
       cancelled = true;
     };
-  }, [open, index, imagesSig, supabase]);
+  }, [open, index, imagesSig, supabase, prefetchedSignedUrlsRef]);
 
   useEffect(() => {
     if (!open) return;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizePostImages, type NormalizedPostImage, type PostWithImages } from "@/lib/post-images";
 import PostImageLightbox from "./PostImageLightbox";
@@ -33,6 +33,11 @@ export default function PostMediaGallery({
     normalizedImages && normalizedImages.length > 0 ? normalizedImages : post ? normalizePostImages(post) : [];
   const [open, setOpen] = useState(false);
   const [idx, setIdx] = useState(0);
+  /** Paths signed in thumbnails; lightbox reads this ref for instant reuse. */
+  const signedUrlByPathRef = useRef<Map<string, string>>(new Map());
+  const onGallerySignedUrl = useCallback((path: string, url: string) => {
+    signedUrlByPathRef.current.set(path, url);
+  }, []);
   const imgClass = variant === "quoted" ? nestImgClass : feedImgClass;
 
   if (images.length === 0) return null;
@@ -49,6 +54,7 @@ export default function PostMediaGallery({
       supabase={supabase}
       images={images}
       initialIndex={idx}
+      prefetchedSignedUrlsRef={signedUrlByPathRef}
     />
   );
 
@@ -69,6 +75,7 @@ export default function PostMediaGallery({
               legacyUrl={im.src}
               alt={im.alt}
               className={imgClass}
+              onSignedUrl={onGallerySignedUrl}
             />
           </button>
         </div>
@@ -95,6 +102,7 @@ export default function PostMediaGallery({
                 legacyUrl={im.src}
                 alt={im.alt}
                 className={imgClass}
+                onSignedUrl={onGallerySignedUrl}
               />
             </button>
           ))}
@@ -120,6 +128,7 @@ export default function PostMediaGallery({
               legacyUrl={images[0].src}
               alt={images[0].alt}
               className={`${imgClass} max-h-none`}
+              onSignedUrl={onGallerySignedUrl}
             />
           </button>
           <button
@@ -134,6 +143,7 @@ export default function PostMediaGallery({
               legacyUrl={images[1].src}
               alt={images[1].alt}
               className={`${imgClass} max-h-[calc(35vh-0.25rem)]`}
+              onSignedUrl={onGallerySignedUrl}
             />
           </button>
           <button
@@ -148,6 +158,7 @@ export default function PostMediaGallery({
               legacyUrl={images[2].src}
               alt={images[2].alt}
               className={`${imgClass} max-h-[calc(35vh-0.25rem)]`}
+              onSignedUrl={onGallerySignedUrl}
             />
           </button>
         </div>
@@ -176,6 +187,7 @@ export default function PostMediaGallery({
               legacyUrl={im.src}
               alt={im.alt}
               className="h-full w-full max-h-[min(35vh,12rem)] object-contain"
+              onSignedUrl={onGallerySignedUrl}
             />
             {i === 3 && rest > 0 ? (
               <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/55 text-xl font-semibold text-white">

@@ -324,10 +324,10 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               currentUserId={user?.id ?? null}
               onPostDeleted={loadPosts}
               onPostUpdated={loadPosts}
-              onReblog={async (p, commentary) => {
+              onReblog={async (p, commentary, tags) => {
                 setRebloggingId(p.id);
                 try {
-                  return await handleReblog(p, commentary);
+                  return await handleReblog(p, commentary, tags);
                 } finally {
                   setRebloggingId(null);
                 }

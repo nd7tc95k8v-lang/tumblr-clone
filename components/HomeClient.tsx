@@ -10,6 +10,7 @@ import {
   mergeFollowingFeedSources,
 } from "@/lib/supabase/fetch-feed-posts";
 import { annotatePostsForHomeFollowingFeed } from "@/lib/home-following-feed";
+import { noteOwnerPostIdForCard } from "@/lib/feed-post-display";
 import {
   DEFAULT_NSFW_FEED_MODE,
   excludeNsfwPostsFromFeedQuery,
@@ -349,8 +350,13 @@ function ClientShell() {
         sessionStorage.removeItem(PENDING_FEED_POST_STORAGE_KEY);
         const pending = JSON.parse(raw) as FeedPost;
         if (pending && typeof pending.id === "string" && pending.id.length > 0) {
-          if (!(excludeNsfwFromHomeFeed && pending.is_nsfw)) {
-            prependPostWithScrollPreserve(pending);
+          const normalized: FeedPost =
+            typeof pending.card_engagement_owner_post_id === "string" &&
+            pending.card_engagement_owner_post_id.length > 0
+              ? pending
+              : { ...pending, card_engagement_owner_post_id: noteOwnerPostIdForCard(pending) };
+          if (!(excludeNsfwFromHomeFeed && normalized.is_nsfw)) {
+            prependPostWithScrollPreserve(normalized);
           }
         }
       }

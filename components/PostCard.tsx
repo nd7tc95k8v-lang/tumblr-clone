@@ -3,9 +3,10 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ALLOWED_IMAGE_MIME_TYPES, validateImageFile } from "@/lib/image-upload-validation";
+import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
+import { preparePostImageForUpload } from "@/lib/post-image-prep";
 import { coercePostImageRows } from "@/lib/post-images";
-import { postElementDomId } from "@/lib/post-anchor";
+import { postElementDomId, postPermalinkPath } from "@/lib/post-anchor";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
 import { coercePostTags, displayTagsForPost, parseCommaSeparatedTags } from "@/lib/tags";
@@ -30,6 +31,7 @@ import {
 } from "@/lib/post-content-guard";
 import { InlineErrorBanner } from "./InlineErrorBanner";
 import QuotedPostNest from "./QuotedPostNest";
+import { QuoteLayerInlineTime } from "./QuoteLayerInlineTime";
 import PostNotesModal from "./PostNotesModal";
 import ReblogModal from "./ReblogModal";
 import { DEFAULT_NSFW_FEED_MODE, type NsfwFeedMode } from "@/lib/nsfw-feed-preference";
@@ -100,12 +102,38 @@ function QuoteBubbleIcon({ className }: { className?: string }) {
 }
 
 /** User-added commentary on quote reblogs — distinct from nested quoted content. */
-const COMMENTARY_ADDED_LAYER_CLASS =
-  "mt-2 rounded-r-card border-l-2 border-electric-purple/35 bg-surface-blue/55 py-2 pl-3 pr-2";
+const COMMENTARY_ADDED_LAYER_BASE =
+  "rounded-r-card border-l-2 border-electric-purple/35 bg-surface-blue/55 py-2 pl-3 pr-2";
+const COMMENTARY_ADDED_LAYER_CLASS = `mt-2 ${COMMENTARY_ADDED_LAYER_BASE}`;
 
-/** Frames nested quote chains as subordinate to the card author + commentary. */
+/**
+ * Newest quote-layer commentary — matches flattened chain reblog strips ({@link QuotedPostNest}).
+ */
+const QUOTE_REBLOG_LATEST_COMMENTARY_STRIP_CLASS =
+  "mt-1.5 rounded-md border-l-2 border-electric-purple/35 bg-surface-blue/45 py-1.5 pl-2 pr-2 max-md:py-1.5 max-md:pl-2";
+
+/** Frames nested quote chains when shown as a single block (plain quoted path, etc.). */
 const QUOTED_BLOCK_FRAME_CLASS =
-  "mt-2 min-w-0 rounded-lg border border-border-soft bg-bg-secondary/50 p-2 sm:p-2.5";
+  "mt-2 min-w-0 rounded-lg border border-border/50 bg-bg-secondary/60 p-2 shadow-sm ring-1 ring-black/[0.03] sm:p-2.5 dark:ring-white/[0.04]";
+
+/**
+ * Quote reblog: one shell — quoted/original on top (primary), optional reblogger commentary/media
+ * below as a continuation strip (secondary), not a separate card.
+ */
+const QUOTE_REBLOG_STACK_CLASS =
+  "mt-2 min-w-0 overflow-hidden rounded-lg border border-border/50 bg-bg-secondary/60 shadow-sm ring-1 ring-black/[0.03] dark:ring-white/[0.04]";
+
+const QUOTE_REBLOG_QUOTED_INNER_CLASS = "min-w-0 p-2 sm:p-2.5";
+
+/**
+ * Attached add-on under the nest (newest layer): same shell as before, fill one step stronger than older
+ * stack layers so the current reblogger reads as the active layer while staying in one card.
+ */
+const QUOTE_REBLOG_ADDON_CLASS =
+  "min-w-0 border-t border-border-soft/50 bg-bg-secondary/35 px-2 py-2 sm:px-2.5 sm:py-2";
+
+/** Matches {@link QuotedPostNest} layer row — avatar + content column. */
+const QUOTE_REBLOG_LATEST_LAYER_ROW_CLASS = "flex gap-1.5 sm:gap-2";
 
 /** Tabular count slot — avoids horizontal nudge when digits change. */
 const STAT_COUNT_CLASS =
@@ -122,6 +150,12 @@ const ACTION_TEXT_MOBILE = "max-md:text-[0.6875rem] max-md:font-normal max-md:le
 
 /** Calmer secondary actions (notes / reblog / quote / owner menu trigger). */
 const REBLOG_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE} max-md:text-text-secondary/90`;
+
+/** Main reblog control: opens editor (commentary + tags) — reads as the default Tumblr-style path. */
+const REBLOG_EDITOR_PRIMARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} border border-border/55 bg-bg-secondary/55 font-semibold text-text shadow-sm hover:border-border/70 hover:bg-bg-secondary/75 hover:text-text max-md:border-border/50`;
+
+/** Fast reshare: same ritual, no editor — visually lighter than {@link REBLOG_EDITOR_PRIMARY_CLASS}. */
+const REBLOG_INSTANT_SECONDARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} font-normal text-text-secondary/80 opacity-95 hover:text-text-secondary hover:bg-bg-secondary/45`;
 
 /** Like control: same hit/text tuning; color still from liked / muted state. */
 const LIKE_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE}`;
@@ -172,7 +206,7 @@ function NsfwFeedContentWarning({ onReveal }: { onReveal: () => void }) {
 type Props = {
   post: FeedPost;
   rebloggingId: string | null;
-  onReblog: (post: FeedPost, commentary?: string | null) => boolean | Promise<boolean>;
+  onReblog: (post: FeedPost, commentary?: string | null, tags?: string[]) => boolean | Promise<boolean>;
   showReblog?: boolean;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
@@ -187,6 +221,8 @@ type Props = {
    * Omit on profile/tag feeds → defaults to `warn`.
    */
   nsfwFeedMode?: NsfwFeedMode;
+  /** When true, omit the subtle permalink link (e.g. already on `/post/[id]`). */
+  hidePermalink?: boolean;
 };
 
 const TAG_CHIP_BASE =
@@ -363,6 +399,7 @@ export default function PostCard({
   onPostDeleted,
   onPostUpdated,
   nsfwFeedMode,
+  hidePermalink = false,
 }: Props) {
   const [reblogModalPost, setReblogModalPost] = useState<FeedPost | null>(null);
   const [reblogModalBusy, setReblogModalBusy] = useState(false);
@@ -381,6 +418,7 @@ export default function PostCard({
   const [mediaEditBusy, setMediaEditBusy] = useState(false);
   const [mediaEditError, setMediaEditError] = useState<string | null>(null);
   const [mediaSlots, setMediaSlots] = useState<MediaSlot[]>([]);
+  /** New uploads in the media editor: each `File` is from {@link preparePostImageForUpload} in addMediaFiles. */
   const [mediaNewFiles, setMediaNewFiles] = useState<File[]>([]);
   const [mediaDragActive, setMediaDragActive] = useState(false);
   const [reblogCount, setReblogCount] = useState(() => Math.max(0, post.reblog_count));
@@ -638,28 +676,36 @@ export default function PostCard({
   }, [post, supabase, closeSiblingOwnerModals]);
 
   const addMediaFiles = useCallback(
-    (incoming: readonly File[]) => {
+    async (incoming: readonly File[]) => {
+      const batch = Array.from(incoming);
+      const accepted: File[] = [];
+      let firstError: string | null = null;
+      let room = Math.max(0, MAX_POST_IMAGES - mediaSlots.length - mediaNewFiles.length);
+      for (const f of batch) {
+        if (room <= 0) break;
+        const prepared = await preparePostImageForUpload(f);
+        if (!prepared.ok) {
+          if (!firstError) firstError = prepared.error;
+          continue;
+        }
+        accepted.push(prepared.file);
+        room -= 1;
+      }
       setMediaNewFiles((prev) => {
         const next = [...prev];
-        let firstError: string | null = null;
-        for (const f of incoming) {
+        for (const file of accepted) {
           if (mediaSlots.length + next.length >= MAX_POST_IMAGES) break;
-          const img = validateImageFile(f);
-          if (!img.ok) {
-            if (!firstError) firstError = img.error;
-            continue;
-          }
-          next.push(f);
+          next.push(file);
         }
-        queueMicrotask(() => {
-          if (!mountedRef.current) return;
-          if (firstError) setMediaEditError(firstError);
-          else setMediaEditError(null);
-        });
         return next;
       });
+      queueMicrotask(() => {
+        if (!mountedRef.current) return;
+        if (firstError) setMediaEditError(firstError);
+        else setMediaEditError(null);
+      });
     },
-    [mediaSlots.length],
+    [mediaSlots.length, mediaNewFiles.length],
   );
 
   const handleSaveMedia = useCallback(async () => {
@@ -699,15 +745,13 @@ export default function PostCard({
         const removedRowIds = [...mediaInitialRowIdsRef.current].filter((id) => !keptRowIds.has(id));
 
         const newPaths: string[] = [];
-        for (const f of mediaNewFiles) {
-          const v = validateImageFile(f);
-          if (!v.ok) throw new Error(v.error);
-          const rawExt = f.name.split(".").pop();
+        for (const uploadFile of mediaNewFiles) {
+          const rawExt = uploadFile.name.split(".").pop();
           const fileExt =
             rawExt && /^[a-z0-9]+$/i.test(rawExt) && rawExt.length <= 8 ? rawExt.toLowerCase() : "jpg";
           const filePath = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
-          const { error: upErr } = await supabase.storage.from("post-images").upload(filePath, f, {
-            contentType: f.type || `image/${fileExt}`,
+          const { error: upErr } = await supabase.storage.from("post-images").upload(filePath, uploadFile, {
+            contentType: uploadFile.type || `image/${fileExt}`,
             upsert: false,
           });
           if (upErr) throw upErr;
@@ -889,7 +933,7 @@ export default function PostCard({
             <div className={COMMENTARY_ADDED_LAYER_CLASS}>
               <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">{ungatedCommentary}</p>
             </div>
-          ) : quoteLayer && commentary ? (
+          ) : quoteLayer && commentary && !showNestedQuote ? (
             <div className={COMMENTARY_ADDED_LAYER_CLASS}>
               <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">{commentary}</p>
             </div>
@@ -898,7 +942,7 @@ export default function PostCard({
             <NsfwFeedContentWarning onReveal={() => setNsfwRevealed(true)} />
           ) : (
             <>
-              {quoteOuterMedia && quoteOuterMedia.length > 0 ? (
+              {!showNestedQuote && quoteOuterMedia && quoteOuterMedia.length > 0 ? (
                 <PostMediaGallery
                   supabase={supabase}
                   normalizedImages={quoteOuterMedia}
@@ -937,16 +981,11 @@ export default function PostCard({
                   ) : null}
                   {plainResolved.node.quoted_post ? (
                     <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                      <QuotedPostNest
-                        node={plainResolved.node.quoted_post}
-                        depth={0}
-                        supabase={supabase}
-                        {...quoteNestExpandProps}
-                      />
+                      <QuotedPostNest node={plainResolved.node.quoted_post} supabase={supabase} {...quoteNestExpandProps} />
                     </div>
                   ) : (
                     <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                      <QuotedPostNest node={plainResolved.node} depth={0} supabase={supabase} {...quoteNestExpandProps} />
+                      <QuotedPostNest node={plainResolved.node} supabase={supabase} {...quoteNestExpandProps} />
                     </div>
                   )}
                 </>
@@ -969,8 +1008,47 @@ export default function PostCard({
                 </>
               ) : null}
               {showNestedQuote && post.quoted_post ? (
-                <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                  <QuotedPostNest node={post.quoted_post} depth={0} supabase={supabase} {...quoteNestExpandProps} />
+                <div className={QUOTE_REBLOG_STACK_CLASS}>
+                  <div className={QUOTE_REBLOG_QUOTED_INNER_CLASS}>
+                    <QuotedPostNest node={post.quoted_post} supabase={supabase} {...quoteNestExpandProps} />
+                  </div>
+                  {(commentary && !ungatedCommentary) || (quoteOuterMedia && quoteOuterMedia.length > 0) ? (
+                    <div className={QUOTE_REBLOG_ADDON_CLASS}>
+                      <div className={QUOTE_REBLOG_LATEST_LAYER_ROW_CLASS}>
+                        <ProfileAvatar
+                          url={primaryAvatarUrl}
+                          label={primary}
+                          size="sm"
+                          className="mt-0.5 shrink-0"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-baseline justify-between gap-x-2">
+                            <p className="min-w-0 flex-1 truncate font-heading text-sm font-semibold leading-tight text-text">
+                              <ProfileUsernameLink usernameRaw={primaryRaw} className="font-semibold text-inherit">
+                                {primary}
+                              </ProfileUsernameLink>
+                            </p>
+                            <QuoteLayerInlineTime iso={post.created_at} />
+                          </div>
+                          {commentary && !ungatedCommentary ? (
+                            <div className={QUOTE_REBLOG_LATEST_COMMENTARY_STRIP_CLASS}>
+                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-text max-md:text-[0.8125rem] max-md:leading-snug">
+                                {commentary}
+                              </p>
+                            </div>
+                          ) : null}
+                          {quoteOuterMedia && quoteOuterMedia.length > 0 ? (
+                            <PostMediaGallery
+                              supabase={supabase}
+                              normalizedImages={quoteOuterMedia}
+                              variant="feed"
+                              wrapperClassName="mt-1.5 max-md:mt-1.5"
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </>
@@ -1072,29 +1150,20 @@ export default function PostCard({
                     {notesTriggerTotal} {notesTriggerTotal === 1 ? "note" : "notes"}
                   </span>
                 </button>
+                {!hidePermalink ? (
+                  <Link
+                    href={postPermalinkPath(post.id)}
+                    className="shrink-0 text-meta font-medium tabular-nums text-text-secondary/75 underline-offset-2 hover:text-link hover:underline max-md:text-[0.6875rem]"
+                    title="Open post page (shareable link)"
+                    aria-label="Open post permalink"
+                    prefetch={false}
+                  >
+                    Link
+                  </Link>
+                ) : null}
               </div>
               {showReblog ? (
                 <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 max-md:gap-x-1 sm:ml-0.5">
-                  <button
-                    type="button"
-                    disabled={rebloggingId !== null}
-                    onClick={() => {
-                      setReblogModalError(null);
-                      void onReblog(post, null);
-                    }}
-                    className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none ${
-                      rebloggingId === post.id
-                        ? "cursor-wait bg-bg-secondary/50 opacity-90 ring-1 ring-border/45"
-                        : "cursor-pointer"
-                    }`}
-                    aria-busy={rebloggingId === post.id}
-                    aria-label={rebloggingId === post.id ? "Reblogging" : "Reblog"}
-                  >
-                    <span className="inline-flex h-4 w-4 items-center justify-center shrink-0" aria-hidden>
-                      <RepostStatIcon className={ICON_BOX} />
-                    </span>
-                    <span>{rebloggingId === post.id ? "Reblogging…" : "Reblog"}</span>
-                  </button>
                   <button
                     type="button"
                     disabled={rebloggingId !== null || reblogModalBusy}
@@ -1102,18 +1171,48 @@ export default function PostCard({
                       setReblogModalError(null);
                       setReblogModalPost(post);
                     }}
-                    className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none ${
+                    className={`${REBLOG_EDITOR_PRIMARY_CLASS} touch-manipulation select-none ${
                       reblogModalBusy
-                        ? "cursor-wait bg-bg-secondary/50 opacity-90 ring-1 ring-border/45"
+                        ? "cursor-wait border-border/45 bg-bg-secondary/50 opacity-95 ring-1 ring-border/40"
                         : "cursor-pointer"
                     }`}
                     aria-busy={reblogModalBusy}
-                    aria-label="Quote with commentary"
+                    aria-label={
+                      reblogModalBusy
+                        ? "Publishing reblog with commentary or tags"
+                        : "Reblog — add optional commentary and tags"
+                    }
+                    title="Reblog to your blog; add optional commentary and tags"
                   >
                     <span className="inline-flex h-4 w-4 items-center justify-center shrink-0" aria-hidden>
                       <QuoteBubbleIcon className={ICON_BOX} />
                     </span>
-                    <span>Quote</span>
+                    <span>{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={rebloggingId !== null || reblogModalBusy}
+                    onClick={() => {
+                      setReblogModalError(null);
+                      void onReblog(post, null);
+                    }}
+                    className={`${REBLOG_INSTANT_SECONDARY_CLASS} touch-manipulation select-none ${
+                      rebloggingId === post.id
+                        ? "cursor-wait bg-bg-secondary/40 opacity-90 ring-1 ring-border/35"
+                        : "cursor-pointer"
+                    }`}
+                    aria-busy={rebloggingId === post.id}
+                    aria-label={
+                      rebloggingId === post.id
+                        ? "Instant reblogging, no commentary or tags"
+                        : "Instant reblog — skip editor, no commentary or tags"
+                    }
+                    title="Instant reblog without opening the editor"
+                  >
+                    <span className="inline-flex h-4 w-4 items-center justify-center shrink-0" aria-hidden>
+                      <RepostStatIcon className={ICON_BOX} />
+                    </span>
+                    <span>{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
                   </button>
                 </span>
               ) : null}
@@ -1185,6 +1284,7 @@ export default function PostCard({
           </div>
         </div>
       </div>
+      {/* Shipped Notes: thread root only. A future per-card / authored-layer notes owner may differ from this id. */}
       <PostNotesModal
         open={notesModalOpen}
         onClose={() => setNotesModalOpen(false)}
@@ -1203,9 +1303,9 @@ export default function PostCard({
           setReblogModalError(null);
           setReblogModalPost(null);
         }}
-        onConfirm={async (raw) => {
+        onConfirm={async ({ commentary, tags }) => {
           if (!reblogModalPost) return;
-          const trimmed = raw.trim();
+          const trimmed = commentary.trim();
           const guard = validateUserWrittenContent(trimmed, { allowEmpty: true });
           if (!guard.ok) {
             setReblogModalError(guard.message);
@@ -1214,7 +1314,11 @@ export default function PostCard({
           setReblogModalError(null);
           setReblogModalBusy(true);
           try {
-            const ok = await onReblog(reblogModalPost, trimmed.length > 0 ? trimmed : null);
+            const ok = await onReblog(
+              reblogModalPost,
+              trimmed.length > 0 ? trimmed : null,
+              tags,
+            );
             if (ok && trimmed.length > 0) {
               recordSuccessfulUserWrittenPost(normalizePostBodyForDedup(trimmed));
             }

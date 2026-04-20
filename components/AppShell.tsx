@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { User } from "@supabase/supabase-js";
 import { APP_NAME, NOTIFICATION_INBOX_MARKED_READ_EVENT } from "@/lib/constants";
 import { fetchNotificationUnreadCount } from "@/lib/supabase/notifications-inbox";
+import { clearPostImageSignedUrlCache } from "@/lib/supabase/post-image-url-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 import SidebarAccount from "./SidebarAccount";
@@ -127,7 +128,10 @@ function useSupabaseSidebarAuth(supabase: ReturnType<typeof createBrowserSupabas
     if (!supabase) return;
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(() => {
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT" || event === "SIGNED_IN" || event === "USER_UPDATED") {
+        clearPostImageSignedUrlCache();
+      }
       void refresh();
     });
     return () => subscription.unsubscribe();

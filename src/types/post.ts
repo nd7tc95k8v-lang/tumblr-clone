@@ -62,8 +62,19 @@ export type FeedPost = {
   reblog_of?: string | null;
   /** Optional note from the reblogger; only set when `reblog_of` is non-null. */
   reblog_commentary?: string | null;
-  /** Root post id for this chain (equals `id` for originals). */
+  /**
+   * Thread root id for chain structure (`original_post_id` in DB sense; equals `id` for originals).
+   * Feed hydration normalizes this from the row — separately from which id keys engagement RPC maps
+   * (see `attachFeedPostEngagement` in `src/lib/supabase/feed-engagement.ts`).
+   */
   original_post_id: string;
+  /**
+   * Authored-layer / per-card id for **future** engagement (likes, notes, counts) when semantics align
+   * with Tumblr-style per-reblog ownership. Populated at hydrate from `noteOwnerPostIdForCard` in
+   * `src/lib/feed-post-display.ts` — not the same as `original_post_id` (thread root). Shipped likes/Notes
+   * still use thread root.
+   */
+  card_engagement_owner_post_id: string;
   /** Mature content flag; enforced and inherited in DB (immutable once true). */
   is_nsfw: boolean;
   /** Audit hint from DB: parent_chain | profile_default_posts_nsfw | author | none */

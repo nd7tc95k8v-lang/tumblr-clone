@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { noteOwnerPostIdForCard } from "@/lib/feed-post-display";
 import { coercePostImageRows } from "@/lib/post-images";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import {
@@ -73,6 +74,7 @@ export type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw" | "post_
 /**
  * Shared merge/hydration path for feed-shaped post rows (chain roots, quotes, engagement).
  * Used by `fetchFeedPosts` and `fetchSearchPosts`.
+ * Sets `FeedPost.card_engagement_owner_post_id` from `noteOwnerPostIdForCard` (reserved; not used by likes/Notes yet).
  */
 export async function hydrateFeedPostsFromQueryRows(
   supabase: SupabaseClient,
@@ -145,17 +147,23 @@ export async function hydrateFeedPostsFromQueryRows(
     }
   }
 
-  const merged: FeedPost[] = feedRows.map((row) => ({
-    ...row,
-    is_nsfw: Boolean(row.is_nsfw),
-    tags: coercePostTags(row.tags),
-    original_post: map.get(row.original_post_id) ?? null,
-    quoted_post: buildQuotedPostChain(row, chainLookup),
-    like_count: 0,
-    reblog_count: 0,
-    note_comment_count: 0,
-    liked_by_me: false,
-  }));
+  const merged: FeedPost[] = feedRows.map((row): FeedPost => {
+    const quoted_post = buildQuotedPostChain(row, chainLookup);
+    const mergedRow: FeedPost = {
+      ...row,
+      is_nsfw: Boolean(row.is_nsfw),
+      tags: coercePostTags(row.tags),
+      original_post: map.get(row.original_post_id) ?? null,
+      quoted_post,
+      like_count: 0,
+      reblog_count: 0,
+      note_comment_count: 0,
+      liked_by_me: false,
+      card_engagement_owner_post_id: "",
+    };
+    mergedRow.card_engagement_owner_post_id = noteOwnerPostIdForCard(mergedRow);
+    return mergedRow;
+  });
 
   const enriched = await attachFeedPostEngagement(supabase, merged, viewerUserId ?? null);
   return { data: enriched, error: null };
@@ -261,6 +269,46 @@ export async function fetchFeedPosts(
   }
 
   return hydrateFeedPostsFromQueryRows(supabase, rows as FeedQueryRow[], options.viewerUserId ?? null);
+}
+
+/**
+ * Load one post by primary key and hydrate it through the same path as feed rows
+ * (`quoted_post`, `original_post`, engagement). Returns `data: null` when the row is missing
+ * or not visible under RLS (treat like “not found” for UX).
+ */
+export async function fetchFeedPostById(
+  supabase: SupabaseClient,
+  postId: string,
+  viewerUserId: string | null | undefined,
+): Promise<{ data: FeedPost | null; error: { message: string } | null }> {
+  const id = postId?.trim() ?? "";
+  if (!id) {
+    return { data: null, error: { message: "Missing post id" } };
+  }
+
+  const { data: row, error } = await supabase
+    .from("posts")
+    .select(POST_FEED_BASE_SELECT)
+    .eq("id", id)
+    .maybeSingle();
+
+  if (error) {
+    return { data: null, error };
+  }
+  if (!row) {
+    return { data: null, error: null };
+  }
+
+  const { data, error: hydrateError } = await hydrateFeedPostsFromQueryRows(
+    supabase,
+    [row as FeedQueryRow],
+    viewerUserId ?? null,
+  );
+  if (hydrateError) {
+    return { data: null, error: hydrateError };
+  }
+  const first = data?.[0] ?? null;
+  return { data: first, error: null };
 }
 
 /**

@@ -1,12 +1,17 @@
-import { bodyFromPost } from "@/lib/feed-post-display";
+import { bodyFromPost, noteOwnerPostIdForCard } from "@/lib/feed-post-display";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import { buildQuotedPostChain, type ChainPostRow } from "@/lib/quote-chain";
-import { tagsForReblogFromSource } from "@/lib/tags";
+import { coercePostTags } from "@/lib/tags";
 import type { FeedPost, PostAuthorEmbed, QuotedPostNode } from "@/types/post";
 
 export type ReblogInsertOptions = {
   /** Optional commentary shown above the quoted post on the reblog card. */
   commentary?: string | null;
+  /**
+   * Tags authored on this reblog row only (replace semantics). Omit or `[]` for no tags.
+   * Do not pass the source post’s tags unless intentionally re-sharing them.
+   */
+  tags?: string[] | null;
 };
 
 /** Fields for inserting a reblog of `source` (immediate parent = source row). */
@@ -17,13 +22,14 @@ export function reblogInsertFields(source: FeedPost, options?: ReblogInsertOptio
       ? source.original_post_id
       : source.id;
   const commentaryTrim = options?.commentary?.trim() ?? "";
+  const tags = coercePostTags(options?.tags);
   return {
     content,
     image_url: imageSrc ?? source.image_url ?? null,
     image_storage_path: image_storage_path ?? source.image_storage_path?.trim() ?? null,
     reblog_of: source.id,
     original_post_id: rootId,
-    tags: tagsForReblogFromSource(source),
+    tags,
     reblog_commentary: commentaryTrim.length > 0 ? commentaryTrim : null,
     /** Hint only; DB trigger forces true if parent `is_nsfw` (inheritance). */
     is_nsfw: Boolean(source.is_nsfw),
@@ -90,14 +96,15 @@ export function buildOptimisticReblogFeedPost(input: {
   viewerAuthor: PostAuthorEmbed | null;
   source: FeedPost;
   commentary?: string | null;
+  tags?: string[] | null;
 }): FeedPost {
-  const { newId, viewerUserId, viewerAuthor, source, commentary } = input;
-  const insertFields = reblogInsertFields(source, { commentary });
+  const { newId, viewerUserId, viewerAuthor, source, commentary, tags } = input;
+  const insertFields = reblogInsertFields(source, { commentary, tags });
   const chainLookup = collectChainLookupFromFeedPost(source);
   const created_at = new Date().toISOString();
   const quoted_post = buildQuotedPostChain({ id: newId, reblog_of: source.id }, chainLookup);
 
-  return {
+  const optimistic: FeedPost = {
     id: newId,
     content: insertFields.content,
     created_at,
@@ -118,5 +125,8 @@ export function buildOptimisticReblogFeedPost(input: {
     reblog_count: source.reblog_count + 1,
     note_comment_count: source.note_comment_count,
     liked_by_me: false,
+    card_engagement_owner_post_id: "",
   };
+  optimistic.card_engagement_owner_post_id = noteOwnerPostIdForCard(optimistic);
+  return optimistic;
 }

@@ -42,17 +42,10 @@ export function coercePostTags(value: unknown): string[] {
   return value.filter((x): x is string => typeof x === "string");
 }
 
-/** Tags to persist on a reblog row (copy chain root so tag pages stay consistent). */
-export function tagsForReblogFromSource(source: FeedPost): string[] {
-  const root = source.original_post;
-  if (root) {
-    const fromRoot = coercePostTags(root.tags);
-    if (fromRoot.length > 0) return fromRoot;
-  }
-  return coercePostTags(source.tags);
-}
-
-/** Tags shown on a feed card: always this row’s `posts.tags` (including reblogs after copy-on-create). */
+/**
+ * Tags shown on a feed card: always this row’s stored `posts.tags` (originals and reblogs alike).
+ * New reblog rows store only tags the reblogging user entered in the reblog modal — not the source’s tags.
+ */
 export function displayTagsForPost(post: FeedPost): string[] {
   return coercePostTags(post.tags);
 }

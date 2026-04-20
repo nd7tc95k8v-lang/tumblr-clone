@@ -2,7 +2,8 @@ import type { PostImageRow } from "@/types/post";
 
 /**
  * Normalized image entries for display and lightbox.
- * `src` is a legacy/public URL when present; otherwise use `storagePath` with a signed URL client-side.
+ * `src` is a legacy/public URL when present; otherwise use `storagePath` with a signed URL client-side
+ * (`getCachedPostImageSignedUrl` in `supabase/post-image-url-cache`).
  */
 export type NormalizedPostImage = {
   alt: string;

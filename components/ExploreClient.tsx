@@ -122,7 +122,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
   }, [supabase, initialPosts]);
 
   const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null) => {
+    async (original: FeedPost, commentary?: string | null, tags?: string[]) => {
       if (!supabase) return false;
       const {
         data: { user: u },
@@ -136,7 +136,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
       await runProtectedAction(supabase, { kind: "reblog" }, async () => {
         const { error: insertError } = await supabase.from("posts").insert({
           user_id: u.id,
-          ...reblogInsertFields(original, { commentary }),
+          ...reblogInsertFields(original, { commentary, tags: tags ?? [] }),
         });
         if (insertError) {
           console.error(insertError);

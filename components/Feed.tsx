@@ -11,7 +11,7 @@ type Props = {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  onReblog: (post: FeedPost, commentary?: string | null) => boolean | Promise<boolean>;
+  onReblog: (post: FeedPost, commentary?: string | null, tags?: string[]) => boolean | Promise<boolean>;
   showReblog?: boolean;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
@@ -131,10 +131,10 @@ const Feed: React.FC<Props> = ({
             supabase={supabase}
             currentUserId={currentUserId}
             searchHighlightTags={postSearchHighlightTags}
-            onReblog={async (p, commentary) => {
+            onReblog={async (p, commentary, tags) => {
               setRebloggingId(p.id);
               try {
-                return await onReblog(p, commentary);
+                return await onReblog(p, commentary, tags);
               } finally {
                 setRebloggingId(null);
               }

@@ -34,6 +34,22 @@ type CommentNoteRow = {
     | null;
 };
 
+// ---------------------------------------------------------------------------
+// Notes query ownership (thread root vs future per-card)
+// ---------------------------------------------------------------------------
+//
+// **Shipped:** list + totals RPCs/queries key off the **thread root** (same id as `PostNotesModal`’s
+// `threadRootPostId` prop and feed engagement thread scope).
+//
+// **Future:** per-reblog / authored-layer Notes may key off `FeedPost.card_engagement_owner_post_id` /
+// `noteOwnerPostIdForCard` — add a parallel query key path then; do not overload thread root until RPCs
+// and `post_note_comments.thread_root_post_id` semantics are decided.
+
+/** Normalized thread-root id used for all current Notes fetches (unchanged contract). */
+function notesThreadRootQueryKey(raw: string | undefined): string {
+  return raw?.trim() ?? "";
+}
+
 function clampLimit(limit?: number): number {
   if (limit === undefined || limit === null || Number.isNaN(limit)) return DEFAULT_LIMIT;
   const n = Math.floor(limit);
@@ -74,7 +90,11 @@ function compareNotes(a: PostNote, b: PostNote): number {
 }
 
 export type FetchPostNotesParams = {
-  /** Same id used for likes and reblog counts: `threadRootPostId` / `original_post_id` on the chain. */
+  /**
+   * **Shipped:** thread root for Notes (matches `threadRootPostId(post)` on the card).
+   * Future: optional second param or overload may accept card/authored-layer id — same prep seam as
+   * `feed-engagement.ts` (`engagementKeyForBatchAndMerge` vs thread identity).
+   */
   threadRootPostId: string;
   /** Max combined items after merge (fetches up to this many from each source). Default 50, max 200. */
   limit?: number;
@@ -86,16 +106,76 @@ export type FetchPostNotesResult = {
 };
 
 /**
+ * Merge like rows, reblog rows, and comment rows into one reverse-chronological list (trimmed to limit).
+ * `threadRootNotesKey` is the root id stamped on like/comment-shaped notes and `root_post_id` on all.
+ */
+function assembleMergedPostNotes(
+  threadRootNotesKey: string,
+  likeRows: RpcLikeNoteRow[],
+  reblogRows: ReblogNoteRow[],
+  commentRows: CommentNoteRow[],
+  maxItems: number,
+): PostNote[] {
+  const notes: PostNote[] = [];
+
+  for (const row of likeRows) {
+    notes.push({
+      kind: "like",
+      acted_at: row.acted_at,
+      user_id: row.user_id,
+      username: row.username ?? null,
+      avatar_url: row.avatar_url ?? null,
+      post_id: threadRootNotesKey,
+      root_post_id: threadRootNotesKey,
+    });
+  }
+
+  for (const row of reblogRows) {
+    const au = unwrapAuthor(row.author);
+    const commentary = row.reblog_commentary?.trim() ?? "";
+    const hasCommentary = commentary.length > 0;
+    notes.push({
+      kind: "reblog",
+      acted_at: row.created_at,
+      user_id: row.user_id,
+      username: au?.username ?? null,
+      avatar_url: au?.avatar_url ?? null,
+      post_id: row.id,
+      root_post_id: threadRootNotesKey,
+      has_commentary: hasCommentary,
+      commentary_preview: hasCommentary ? truncatePreview(commentary, COMMENTARY_PREVIEW_MAX) : null,
+    });
+  }
+
+  for (const row of commentRows) {
+    const au = unwrapAuthor(row.author);
+    notes.push({
+      kind: "comment",
+      acted_at: row.created_at,
+      user_id: row.user_id,
+      username: au?.username ?? null,
+      avatar_url: au?.avatar_url ?? null,
+      post_id: threadRootNotesKey,
+      root_post_id: threadRootNotesKey,
+      body: row.body,
+      comment_id: row.id,
+    });
+  }
+
+  notes.sort(compareNotes);
+  return notes.slice(0, maxItems);
+}
+
+/**
  * Combined reverse-chronological notes (likes on the root + reblog rows + flat note comments).
- * Matches thread semantics in {@link attachFeedPostEngagement}: likes target `threadRootPostId`,
- * reblogs are posts with `original_post_id = threadRootPostId` and `id <> threadRootPostId`.
+ * **Shipped:** all queries/RPCs use {@link notesThreadRootQueryKey} only — same behavior as before refactor.
  */
 export async function fetchPostNotes(
   supabase: SupabaseClient,
   params: FetchPostNotesParams,
 ): Promise<FetchPostNotesResult> {
-  const root = params.threadRootPostId?.trim();
-  if (!root) {
+  const threadRootNotesKey = notesThreadRootQueryKey(params.threadRootPostId);
+  if (!threadRootNotesKey) {
     return { data: null, error: { message: "threadRootPostId is required" } };
   }
 
@@ -106,7 +186,7 @@ export async function fetchPostNotes(
 
   const [likesRes, reblogsRes, commentsRes] = await Promise.all([
     supabase.rpc("post_likes_list_for_thread_root", {
-      p_root_post_id: root,
+      p_root_post_id: threadRootNotesKey,
       p_limit: n,
     }),
     supabase
@@ -120,8 +200,8 @@ export async function fetchPostNotes(
         author:profiles!posts_user_id_fkey ( username, avatar_url )
       `,
       )
-      .eq("original_post_id", root)
-      .neq("id", root)
+      .eq("original_post_id", threadRootNotesKey)
+      .neq("id", threadRootNotesKey)
       .order("created_at", { ascending: false })
       .limit(n),
     supabase
@@ -135,7 +215,7 @@ export async function fetchPostNotes(
         author:profiles!post_note_comments_user_id_fkey ( username, avatar_url )
       `,
       )
-      .eq("thread_root_post_id", root)
+      .eq("thread_root_post_id", threadRootNotesKey)
       .order("created_at", { ascending: false })
       .limit(n),
   ]);
@@ -154,54 +234,10 @@ export async function fetchPostNotes(
   const reblogRows = (reblogsRes.data ?? []) as ReblogNoteRow[];
   const commentRows = (commentsRes.data ?? []) as CommentNoteRow[];
 
-  const notes: PostNote[] = [];
-
-  for (const row of likeRows) {
-    notes.push({
-      kind: "like",
-      acted_at: row.acted_at,
-      user_id: row.user_id,
-      username: row.username ?? null,
-      avatar_url: row.avatar_url ?? null,
-      post_id: root,
-      root_post_id: root,
-    });
-  }
-
-  for (const row of reblogRows) {
-    const au = unwrapAuthor(row.author);
-    const commentary = row.reblog_commentary?.trim() ?? "";
-    const hasCommentary = commentary.length > 0;
-    notes.push({
-      kind: "reblog",
-      acted_at: row.created_at,
-      user_id: row.user_id,
-      username: au?.username ?? null,
-      avatar_url: au?.avatar_url ?? null,
-      post_id: row.id,
-      root_post_id: root,
-      has_commentary: hasCommentary,
-      commentary_preview: hasCommentary ? truncatePreview(commentary, COMMENTARY_PREVIEW_MAX) : null,
-    });
-  }
-
-  for (const row of commentRows) {
-    const au = unwrapAuthor(row.author);
-    notes.push({
-      kind: "comment",
-      acted_at: row.created_at,
-      user_id: row.user_id,
-      username: au?.username ?? null,
-      avatar_url: au?.avatar_url ?? null,
-      post_id: root,
-      root_post_id: root,
-      body: row.body,
-      comment_id: row.id,
-    });
-  }
-
-  notes.sort(compareNotes);
-  return { data: notes.slice(0, n), error: null };
+  return {
+    data: assembleMergedPostNotes(threadRootNotesKey, likeRows, reblogRows, commentRows, n),
+    error: null,
+  };
 }
 
 export type PostNotesTotalCountResult = {
@@ -215,13 +251,14 @@ export type PostNotesTotalCountResult = {
 /**
  * Thread-level total “notes” count: likes on the root + descendant reblog rows + note comments.
  * Uses the same like/reblog RPCs as `src/lib/supabase/feed-engagement.ts`, plus a head count on `post_note_comments`.
+ * **Shipped:** keyed only by {@link notesThreadRootQueryKey}.
  */
 export async function fetchPostNotesTotalCount(
   supabase: SupabaseClient,
   threadRootPostId: string,
 ): Promise<PostNotesTotalCountResult> {
-  const root = threadRootPostId?.trim();
-  if (!root) {
+  const threadRootNotesKey = notesThreadRootQueryKey(threadRootPostId);
+  if (!threadRootNotesKey) {
     return {
       total: 0,
       like_count: 0,
@@ -232,9 +269,12 @@ export async function fetchPostNotesTotalCount(
   }
 
   const [likesRes, reblogsRes, commentsRes] = await Promise.all([
-    supabase.rpc("post_like_counts", { p_post_ids: [root] }),
-    supabase.rpc("post_reblog_counts_by_root", { p_root_ids: [root] }),
-    supabase.from("post_note_comments").select("id", { count: "exact", head: true }).eq("thread_root_post_id", root),
+    supabase.rpc("post_like_counts", { p_post_ids: [threadRootNotesKey] }),
+    supabase.rpc("post_reblog_counts_by_root", { p_root_ids: [threadRootNotesKey] }),
+    supabase
+      .from("post_note_comments")
+      .select("id", { count: "exact", head: true })
+      .eq("thread_root_post_id", threadRootNotesKey),
   ]);
 
   if (likesRes.error) {

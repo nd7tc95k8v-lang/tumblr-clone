@@ -13,15 +13,96 @@ function num(v: number | string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+// ---------------------------------------------------------------------------
+// Engagement id sources (thread root vs per-card owner)
+// ---------------------------------------------------------------------------
+//
+// Shipped behavior batches and merges on the **thread root** so `like_count`, `liked_by_me`,
+// `reblog_count`, and `note_comment_count` match `usePostLikeToggle` / `PostNotesModal` (thread scope).
+//
+// Future migration: batch `post_like_counts` / `post_ids_liked_by_auth_user` (and related RPCs) on
+// per-card ids, then change `engagementKeyForBatchAndMerge` to delegate to `engagementKeyCardOwner`.
+// Thread-root `original_post_id` stays under `applyThreadRootOriginalPostId` — engagement keys can
+// diverge without overloading chain-structure fields.
+//
+// **Read-only card-owner like probe (unwired):** `fetchReadonlyPrototypeCardOwnerLikeProbe` in
+// `readonly-card-owner-like-prototype.ts` — same two RPCs, batched on `card_engagement_owner_post_id`
+// for diff vs thread-root maps; see IMPLEMENTATION.md for which totals cannot use existing RPCs.
+
+/** **Shipped:** chain root id — same as `threadRootPostId` / thread-level RPC semantics. */
+function engagementKeyThreadRoot(p: FeedPost): string {
+  return threadRootPostId(p);
+}
+
+/**
+ * **Future target:** authored-layer / per-card id from hydrate (`noteOwnerPostIdForCard`).
+ * Not used for RPC batching or merge yet.
+ */
+function engagementKeyCardOwner(p: FeedPost): string {
+  return p.card_engagement_owner_post_id;
+}
+
+/**
+ * **Active batch + merge key** — today equals thread root. Single place to swap for per-card RPCs.
+ */
+function engagementKeyForBatchAndMerge(p: FeedPost): string {
+  return engagementKeyThreadRoot(p);
+}
+
+function distinctNonEmptyIds(posts: FeedPost[], keyFn: (p: FeedPost) => string): string[] {
+  return [
+    ...new Set(
+      posts
+        .map(keyFn)
+        .filter((id): id is string => id.trim().length > 0),
+    ),
+  ];
+}
+
+/**
+ * Merge **engagement-only** fields (`like_count`, `reblog_count`, `note_comment_count`, `liked_by_me`)
+ * from RPC maps using the active engagement batch key (shipped: thread root).
+ * Does **not** set `original_post_id` — that is thread-structure data; see {@link applyThreadRootOriginalPostId}.
+ */
+function mergeEngagementCountsOntoPost(
+  p: FeedPost,
+  engagementLookupKey: string,
+  likeMap: Map<string, number>,
+  reblogMap: Map<string, number>,
+  noteCommentMap: Map<string, number>,
+  likedBatchKeys: Set<string>,
+): FeedPost {
+  return {
+    ...p,
+    like_count: likeMap.get(engagementLookupKey) ?? 0,
+    reblog_count: reblogMap.get(engagementLookupKey) ?? 0,
+    note_comment_count: noteCommentMap.get(engagementLookupKey) ?? 0,
+    liked_by_me: likedBatchKeys.has(engagementLookupKey),
+  };
+}
+
+/**
+ * Normalize **thread-root chain identity** on the row (`original_post_id` = `threadRootPostId`).
+ * Intentionally separate from engagement map merge so per-card engagement can later use a different
+ * lookup key without conflating chain structure with like/reblog/note totals.
+ */
+function applyThreadRootOriginalPostId(row: FeedPost): FeedPost {
+  const threadRoot = threadRootPostId(row);
+  return { ...row, original_post_id: threadRoot };
+}
+
 /**
  * Merge like/reblog counts and `liked_by_me` for feed rows.
  *
- * Thread model: `original_post_id` is the thread root. Client likes target that root
- * (`usePostLikeToggle`), so we pass **distinct root ids** into:
- * - `post_like_counts` — counts rows in `likes` where `post_id` is each root (thread total).
- * - `post_ids_liked_by_auth_user` — which of those roots the viewer has liked.
- * - `post_reblog_counts_by_root` — reblogs in the chain (rows with that `original_post_id`, excluding root).
- * - `post_note_comment_counts_by_root` — short note comments on each thread root.
+ * **Shipped:** batches distinct **thread-root** ids into:
+ * - `post_like_counts` — counts `likes` where `post_id` is each root.
+ * - `post_ids_liked_by_auth_user` — which roots the viewer liked.
+ * - `post_reblog_counts_by_root` — descendant posts per root.
+ * - `post_note_comment_counts_by_root` — note comments per root.
+ *
+ * **Future:** switch {@link engagementKeyForBatchAndMerge} to use {@link engagementKeyCardOwner}
+ * (and adjust RPCs) for per-reblog engagement; keep {@link applyThreadRootOriginalPostId} unless
+ * chain identity storage changes.
  */
 export async function attachFeedPostEngagement(
   supabase: SupabaseClient,
@@ -30,23 +111,17 @@ export async function attachFeedPostEngagement(
 ): Promise<FeedPost[]> {
   if (posts.length === 0) return posts;
 
-  const rootIds = [
-    ...new Set(
-      posts
-        .map((p) => threadRootPostId(p))
-        .filter((id): id is string => id.trim().length > 0),
-    ),
-  ];
+  const batchIds = distinctNonEmptyIds(posts, engagementKeyForBatchAndMerge);
 
   const [likesRes, reblogsRes, noteCommentsRes] = await Promise.all([
-    rootIds.length > 0
-      ? supabase.rpc("post_like_counts", { p_post_ids: rootIds })
+    batchIds.length > 0
+      ? supabase.rpc("post_like_counts", { p_post_ids: batchIds })
       : Promise.resolve({ data: [] as LikeCountRow[], error: null }),
-    rootIds.length > 0
-      ? supabase.rpc("post_reblog_counts_by_root", { p_root_ids: rootIds })
+    batchIds.length > 0
+      ? supabase.rpc("post_reblog_counts_by_root", { p_root_ids: batchIds })
       : Promise.resolve({ data: [] as ReblogCountRow[], error: null }),
-    rootIds.length > 0
-      ? supabase.rpc("post_note_comment_counts_by_root", { p_root_ids: rootIds })
+    batchIds.length > 0
+      ? supabase.rpc("post_note_comment_counts_by_root", { p_root_ids: batchIds })
       : Promise.resolve({ data: [] as NoteCommentCountRow[], error: null }),
   ]);
 
@@ -75,43 +150,44 @@ export async function attachFeedPostEngagement(
     noteCommentMap.set(row.root_id, num(row.comment_count));
   }
 
-  if (process.env.NODE_ENV === "development" && rootIds.length > 0) {
-    console.debug("[feed-engagement] post_reblog_counts_by_root p_root_ids", rootIds);
+  if (process.env.NODE_ENV === "development" && batchIds.length > 0) {
+    console.debug("[feed-engagement] post_reblog_counts_by_root p_root_ids", batchIds);
     console.debug("[feed-engagement] post_reblog_counts_by_root rows", reblogsRes.data);
     for (const p of posts.slice(0, 5)) {
-      const root = threadRootPostId(p);
+      const mergeKey = engagementKeyForBatchAndMerge(p);
       console.debug(
         "[feed-engagement] post",
         p.id,
-        "threadRootPostId",
-        root,
+        "engagementMergeKey",
+        mergeKey,
         "merged reblog_count",
-        reblogMap.get(root) ?? 0,
+        reblogMap.get(mergeKey) ?? 0,
       );
     }
   }
 
-  let likedRootIds = new Set<string>();
-  if (viewerUserId && rootIds.length > 0) {
+  let likedBatchKeys = new Set<string>();
+  if (viewerUserId && batchIds.length > 0) {
     const { data: likedArr, error } = await supabase.rpc("post_ids_liked_by_auth_user", {
-      p_post_ids: rootIds,
+      p_post_ids: batchIds,
     });
     if (error) {
       console.error(error);
     } else if (Array.isArray(likedArr)) {
-      likedRootIds = new Set(likedArr.map((id) => String(id)));
+      likedBatchKeys = new Set(likedArr.map((id) => String(id)));
     }
   }
 
   return posts.map((p) => {
-    const root = threadRootPostId(p);
-    return {
-      ...p,
-      original_post_id: root,
-      like_count: likeMap.get(root) ?? 0,
-      reblog_count: reblogMap.get(root) ?? 0,
-      note_comment_count: noteCommentMap.get(root) ?? 0,
-      liked_by_me: likedRootIds.has(root),
-    };
+    const engagementLookupKey = engagementKeyForBatchAndMerge(p);
+    const withEngagement = mergeEngagementCountsOntoPost(
+      p,
+      engagementLookupKey,
+      likeMap,
+      reblogMap,
+      noteCommentMap,
+      likedBatchKeys,
+    );
+    return applyThreadRootOriginalPostId(withEngagement);
   });
 }

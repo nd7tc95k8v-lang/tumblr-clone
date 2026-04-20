@@ -5,3 +5,9 @@ export function postElementDomId(postId: string): string {
   const id = postId?.trim() ?? "";
   return `${QRTZ_POST_ELEMENT_ID_PREFIX}${id}`;
 }
+
+/** Stable app URL for a single post (canonical page for sharing, Notes, future replies). */
+export function postPermalinkPath(postId: string): string {
+  const id = postId?.trim() ?? "";
+  return `/post/${encodeURIComponent(id)}`;
+}

@@ -3,13 +3,19 @@
 import React, { useEffect, useState } from "react";
 import type { FeedPost } from "@/types/post";
 import { bodyFromPost, quotedPostAuthorDisplay } from "@/lib/feed-post-display";
+import { parseCommaSeparatedTags } from "@/lib/tags";
 import { InlineErrorBanner } from "./InlineErrorBanner";
+
+export type ReblogModalConfirmPayload = {
+  commentary: string;
+  tags: string[];
+};
 
 type Props = {
   post: FeedPost | null;
   busy: boolean;
   onClose: () => void;
-  onConfirm: (commentary: string) => void | Promise<void>;
+  onConfirm: (payload: ReblogModalConfirmPayload) => void | Promise<void>;
   errorMessage?: string | null;
   onDismissError?: () => void;
 };
@@ -23,9 +29,13 @@ export default function ReblogModal({
   onDismissError,
 }: Props) {
   const [text, setText] = useState("");
+  const [tagsRaw, setTagsRaw] = useState("");
 
   useEffect(() => {
-    if (post) setText("");
+    if (post) {
+      setText("");
+      setTagsRaw("");
+    }
   }, [post]);
 
   useEffect(() => {
@@ -44,6 +54,10 @@ export default function ReblogModal({
   const preview =
     quotedPreview.length > 200 ? `${quotedPreview.slice(0, 200).trim()}…` : quotedPreview;
 
+  const dismissErrorIfNeeded = () => {
+    if (errorMessage && onDismissError) onDismissError();
+  };
+
   return (
     <div
       className="qrtz-modal-overlay"
@@ -57,9 +71,12 @@ export default function ReblogModal({
         onClick={(e) => e.stopPropagation()}
         className="qrtz-modal-panel"
       >
-        <h2 id="reblog-modal-title" className="mb-2 font-heading text-lg font-semibold text-text">
-          Quote
+        <h2 id="reblog-modal-title" className="mb-1 font-heading text-lg font-semibold text-text">
+          Reblog
         </h2>
+        <p className="mb-2 text-meta leading-snug text-text-secondary">
+          Add optional commentary and tags — or reblog as-is.
+        </p>
         <p className="mb-3 line-clamp-4 whitespace-pre-wrap text-meta text-text-muted">
           From <span className="font-medium text-text-secondary">{quotedAuthor}</span>: {preview}
         </p>
@@ -74,13 +91,30 @@ export default function ReblogModal({
           value={text}
           onChange={(e) => {
             setText(e.target.value);
-            if (errorMessage && onDismissError) onDismissError();
+            dismissErrorIfNeeded();
           }}
           disabled={busy}
           rows={4}
           placeholder="Say something about this post…"
           className="qrtz-field mb-3 min-h-[80px] resize-y"
         />
+        <div className="mb-3 flex flex-col gap-1">
+          <label htmlFor="reblog-tags" className="text-meta font-medium text-text-secondary">
+            Tags <span className="font-normal text-text-muted">· optional, commas</span>
+          </label>
+          <input
+            id="reblog-tags"
+            type="text"
+            value={tagsRaw}
+            onChange={(e) => {
+              setTagsRaw(e.target.value);
+              dismissErrorIfNeeded();
+            }}
+            disabled={busy}
+            placeholder="e.g. photo, weekend, cats"
+            className="qrtz-field py-2 text-sm"
+          />
+        </div>
         {errorMessage?.trim() && onDismissError ? (
           <InlineErrorBanner message={errorMessage} onDismiss={onDismissError} className="mb-3" />
         ) : null}
@@ -96,10 +130,15 @@ export default function ReblogModal({
           <button
             type="button"
             disabled={busy}
-            onClick={() => void onConfirm(text)}
+            onClick={() =>
+              void onConfirm({
+                commentary: text,
+                tags: parseCommaSeparatedTags(tagsRaw),
+              })
+            }
             className="qrtz-btn-primary px-4 py-2 text-sm"
           >
-            {busy ? "Quoting…" : "Quote"}
+            {busy ? "Reblogging…" : "Reblog"}
           </button>
         </div>
       </div>

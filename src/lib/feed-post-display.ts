@@ -221,15 +221,37 @@ export function quotedChainLeaf(node: QuotedPostNode | null): QuotedPostNode | n
   return n;
 }
 
-/** How many bordered quote levels exist under `node`, matching `QuotedPostNest` plain-skip rules (already-loaded tree only). */
-export function countVisibleQuotedNestLevels(node: QuotedPostNode | null): number {
-  if (!node) return 0;
-  const isLeaf = !node.reblog_of?.trim();
-  if (!isLeaf && !node.reblog_commentary?.trim() && node.quoted_post) {
-    return countVisibleQuotedNestLevels(node.quoted_post);
+/**
+ * Linear visible chain oldest → newest (original first, then each quote reblog layer toward `entry`).
+ * Matches `QuotedPostNest` plain-intermediate skip rules (already-loaded tree only).
+ */
+export function flattenVisibleQuotedChain(entry: QuotedPostNode | null): QuotedPostNode[] {
+  if (!entry) return [];
+  const path: QuotedPostNode[] = [];
+  let n: QuotedPostNode | null = entry;
+  while (n) {
+    path.push(n);
+    n = n.quoted_post;
   }
-  if (isLeaf) return 1;
-  return 1 + countVisibleQuotedNestLevels(node.quoted_post);
+  const visible: QuotedPostNode[] = [];
+  for (let i = path.length - 1; i >= 0; i -= 1) {
+    const node = path[i];
+    const isLeaf = !node.reblog_of?.trim();
+    if (isLeaf) {
+      visible.push(node);
+      continue;
+    }
+    if (!node.reblog_commentary?.trim() && node.quoted_post) {
+      continue;
+    }
+    visible.push(node);
+  }
+  return visible;
+}
+
+/** How many visible quote layers `node` contributes (same length as {@link flattenVisibleQuotedChain}). */
+export function countVisibleQuotedNestLevels(node: QuotedPostNode | null): number {
+  return flattenVisibleQuotedChain(node).length;
 }
 
 /** Default max visible nest depth (0…MAX-1); deeper tail is behind “Show full chain”. */
@@ -371,4 +393,34 @@ export function postCardHeaderProfile(post: FeedPost): {
     primaryRaw: raw,
     primaryAvatarUrl: authorAvatarUrl(post),
   };
+}
+
+/**
+ * Post id that “owns” this card’s authored layer for Tumblr-style per-reblog semantics (Notes,
+ * engagement, etc.). Purely derived from the loaded {@link FeedPost}; mirrors the same collapse rules
+ * as {@link postCardHeaderProfile} / {@link resolvePlainReblogDisplay}.
+ *
+ * - Original (`reblog_of` empty) → `post.id`.
+ * - Quote layer ({@link hasQuoteReblogLayer}: commentary and/or distinct outer media) → `post.id`.
+ * - Plain reblog → {@link resolvePlainReblogDisplay}: `quoted` → that node’s id; `flat` → leaf id;
+ *   unresolved chain → `post.id`.
+ *
+ * @todo Wire here (likes, note comments, per-row counts) only after feed hydration and Notes modal
+ *   agree on the same id — today likes stay thread-root for consistency.
+ */
+export function noteOwnerPostIdForCard(post: FeedPost): string {
+  if (!post.reblog_of?.trim()) {
+    return post.id;
+  }
+  if (hasQuoteReblogLayer(post)) {
+    return post.id;
+  }
+  const resolved = resolvePlainReblogDisplay(post);
+  if (resolved?.kind === "flat") {
+    return resolved.leaf.id;
+  }
+  if (resolved?.kind === "quoted") {
+    return resolved.node.id;
+  }
+  return post.id;
 }

@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
-import { ALLOWED_IMAGE_MIME_TYPES, validateImageFile } from "@/lib/image-upload-validation";
+import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
+import { preparePostImageForUpload } from "@/lib/post-image-prep";
 import {
   normalizePostBodyForDedup,
   recordSuccessfulUserWrittenPost,
@@ -60,6 +61,7 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
   const [content, setContent] = useState("");
   const [tagsRaw, setTagsRaw] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  /** Prepared attachments: each `File` is the result of {@link preparePostImageForUpload} (normalize → validate). */
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [markNsfw, setMarkNsfw] = useState(() => Boolean(defaultMarkNsfw));
   const [formError, setFormError] = useState<string | null>(null);
@@ -147,27 +149,34 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
 
   const canAddCount = useMemo(() => Math.max(0, MAX_POST_IMAGES - selectedFiles.length), [selectedFiles.length]);
 
-  const addValidatedFiles = useCallback((incoming: readonly File[]) => {
+  const addValidatedFiles = useCallback(async (incoming: readonly File[]) => {
     const batch = Array.from(incoming);
+    const accepted: File[] = [];
+    let firstError: string | null = null;
+    let room = Math.max(0, MAX_POST_IMAGES - selectedFiles.length);
+    for (const f of batch) {
+      if (room <= 0) break;
+      const prepared = await preparePostImageForUpload(f);
+      if (!prepared.ok) {
+        if (!firstError) firstError = prepared.error;
+        continue;
+      }
+      accepted.push(prepared.file);
+      room -= 1;
+    }
     setSelectedFiles((prev) => {
       const next = [...prev];
-      let firstError: string | null = null;
-      for (const f of batch) {
+      for (const file of accepted) {
         if (next.length >= MAX_POST_IMAGES) break;
-        const img = validateImageFile(f);
-        if (!img.ok) {
-          if (!firstError) firstError = img.error;
-          continue;
-        }
-        next.push(f);
+        next.push(file);
       }
-      queueMicrotask(() => {
-        if (firstError) setFormError(firstError);
-        else setFormError(null);
-      });
       return next;
     });
-  }, []);
+    queueMicrotask(() => {
+      if (firstError) setFormError(firstError);
+      else setFormError(null);
+    });
+  }, [selectedFiles.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -193,14 +202,6 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
     if (!written.ok) {
       setFormError(written.message);
       return;
-    }
-
-    for (const f of selectedFiles) {
-      const img = validateImageFile(f);
-      if (!img.ok) {
-        setFormError(img.error);
-        return;
-      }
     }
 
     setSubmitting(true);

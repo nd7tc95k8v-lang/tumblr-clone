@@ -21,6 +21,21 @@ import ProfileUsernameLink from "./ProfileUsernameLink";
 const NOTES_FETCH_LIMIT = 50;
 const NOTE_COMMENT_MAX_LEN = 500;
 
+// ---------------------------------------------------------------------------
+// Notes modal scope (shipped vs future)
+// ---------------------------------------------------------------------------
+//
+// **Shipped:** this modal is **thread-root–scoped** only. The `threadRootPostId` prop is the chain root
+// used by `fetchPostNotes` / `fetchPostNotesTotalCount` and for `post_note_comments.thread_root_post_id`.
+//
+// **Future:** a per-card / authored-layer Notes anchor (e.g. `FeedPost.card_engagement_owner_post_id`) may
+// be passed alongside or instead — keep fetch + composer keys explicit when that lands.
+
+/** Normalized thread-root id for all current Notes fetches and comment inserts (unchanged contract). */
+function shippedNotesModalThreadRootKey(raw: string): string {
+  return raw?.trim() ?? "";
+}
+
 /** Compact follow control; primary for Follow, muted border for Following (matches profile intent, smaller). */
 const FOLLOW_BTN_BASE =
   "shrink-0 rounded-md px-2 py-0.5 text-meta font-medium transition-[opacity,colors,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-45";
@@ -30,8 +45,14 @@ type Props = {
   onClose: () => void;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
+  /**
+   * **Shipped — thread root only:** chain root (`threadRootPostId(post)` on the card). Drives every Notes
+   * list/total fetch and new comment rows’ `thread_root_post_id`. Not the feed row id on reblogs unless
+   * this card *is* the root. Future authored-layer Notes may add a separate prop; this name stays
+   * explicit so callers are not tempted to pass `card_engagement_owner_post_id` here until supported.
+   */
   threadRootPostId: string;
-  /** Applied to the PostCard Notes badge (+1 / -1) without refetching the feed. */
+  /** Thread-scoped: applied to the PostCard Notes badge (+1 / -1) without refetching the feed. */
   onThreadNoteCountDelta?: (delta: number) => void;
 };
 
@@ -121,8 +142,8 @@ export default function PostNotesModal({
         if (!silent) setLoading(false);
         return;
       }
-      const root = threadRootPostId?.trim();
-      if (!root) {
+      const notesThreadRootKey = shippedNotesModalThreadRootKey(threadRootPostId);
+      if (!notesThreadRootKey) {
         if (!isCancelled?.()) setError("Could not resolve this thread.");
         if (!silent) setLoading(false);
         return;
@@ -139,8 +160,11 @@ export default function PostNotesModal({
         setFollowedIdSet(new Set());
       }
 
-      const notesPromise = fetchPostNotes(supabase, { threadRootPostId: root, limit: NOTES_FETCH_LIMIT });
-      const totalsPromise = fetchPostNotesTotalCount(supabase, root);
+      const notesPromise = fetchPostNotes(supabase, {
+        threadRootPostId: notesThreadRootKey,
+        limit: NOTES_FETCH_LIMIT,
+      });
+      const totalsPromise = fetchPostNotesTotalCount(supabase, notesThreadRootKey);
       const followsPromise =
         currentUserId && currentUserId.trim().length > 0
           ? supabase.from("follows").select("following_id").eq("follower_id", currentUserId)
@@ -257,8 +281,8 @@ export default function PostNotesModal({
 
   const handleSubmitComment = useCallback(async () => {
     if (!supabase || !currentUserId) return;
-    const root = threadRootPostId?.trim();
-    if (!root) return;
+    const notesThreadRootKey = shippedNotesModalThreadRootKey(threadRootPostId);
+    if (!notesThreadRootKey) return;
 
     const trimmed = composerText.trim();
     if (trimmed.length > NOTE_COMMENT_MAX_LEN) {
@@ -277,7 +301,7 @@ export default function PostNotesModal({
     try {
       await runProtectedAction(supabase, { kind: "note_comment" }, async () => {
         const { error: insErr } = await supabase.from("post_note_comments").insert({
-          thread_root_post_id: root,
+          thread_root_post_id: notesThreadRootKey,
           user_id: currentUserId,
           body: trimmed,
         });

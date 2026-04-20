@@ -2,11 +2,12 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  getCachedPostImageSignedUrl,
+  invalidatePostImageSignedUrlCache,
+} from "@/lib/supabase/post-image-url-cache";
 
-const BUCKET = "post-images";
-/** Supabase signed URL TTL (seconds). */
-const SIGNED_SEC = 3600;
-/** Refresh before typical expiry (50 min for 60 min URLs) so long-open tabs keep loading. */
+/** Periodically re-check cache (may refresh near expiry via shared cache). */
 const REFRESH_MS = 50 * 60 * 1000;
 
 type Props = {
@@ -15,19 +16,30 @@ type Props = {
   legacyUrl: string | null | undefined;
   alt: string;
   className?: string;
+  /** Fired when a signed URL is ready for this path (not used for legacy-only URLs). */
+  onSignedUrl?: (storagePath: string, url: string) => void;
 };
 
 /**
  * Renders a post image: signed URL for `image_storage_path` (private bucket), else legacy `image_url`.
- * Periodically re-signs URLs; `onError` triggers a limited retry for expired links.
+ * Uses shared {@link getCachedPostImageSignedUrl}; `onError` triggers a limited retry for expired links.
  */
-export default function PostMediaImage({ supabase, storagePath, legacyUrl, alt, className }: Props) {
+export default function PostMediaImage({
+  supabase,
+  storagePath,
+  legacyUrl,
+  alt,
+  className,
+  onSignedUrl,
+}: Props) {
   const path = storagePath?.trim() || null;
   const legacy = legacyUrl?.trim() || null;
   const [src, setSrc] = useState<string | null>(() => (!path ? legacy : null));
   const [err, setErr] = useState(false);
   const [signNonce, setSignNonce] = useState(0);
   const imgErrorRetries = useRef(0);
+  const onSignedUrlRef = useRef(onSignedUrl);
+  onSignedUrlRef.current = onSignedUrl;
 
   useEffect(() => {
     imgErrorRetries.current = 0;
@@ -44,20 +56,18 @@ export default function PostMediaImage({ supabase, storagePath, legacyUrl, alt, 
       return;
     }
     let cancelled = false;
-    void supabase.storage
-      .from(BUCKET)
-      .createSignedUrl(path, SIGNED_SEC)
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error || !data?.signedUrl) {
-          console.error(error);
-          setErr(true);
-          setSrc(legacy);
-          return;
-        }
-        setErr(false);
-        setSrc(data.signedUrl);
-      });
+    void getCachedPostImageSignedUrl(supabase, path).then(({ url, error }) => {
+      if (cancelled) return;
+      if (error || !url) {
+        console.error(error);
+        setErr(true);
+        setSrc(legacy);
+        return;
+      }
+      setErr(false);
+      setSrc(url);
+      onSignedUrlRef.current?.(path, url);
+    });
     return () => {
       cancelled = true;
     };
@@ -73,6 +83,7 @@ export default function PostMediaImage({ supabase, storagePath, legacyUrl, alt, 
     if (!path || !supabase) return;
     if (imgErrorRetries.current >= 2) return;
     imgErrorRetries.current += 1;
+    invalidatePostImageSignedUrlCache(path);
     setSignNonce((n) => n + 1);
   };
 
