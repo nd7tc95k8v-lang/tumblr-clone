@@ -10,6 +10,12 @@ import {
   unfollowNormalizedTagForUser,
   userFollowsNormalizedTag,
 } from "@/lib/supabase/followed-tags";
+import {
+  DEFAULT_NSFW_FEED_MODE,
+  excludeNsfwPostsFromFeedQuery,
+  resolveNsfwFeedModeFromProfileRow,
+  type NsfwFeedMode,
+} from "@/lib/nsfw-feed-preference";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { reblogInsertFields } from "@/lib/reblog";
 import type { FeedPost } from "@/types/post";
@@ -35,6 +41,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
   const [tagFollowBusy, setTagFollowBusy] = useState(false);
   const [tagFollowError, setTagFollowError] = useState<string | null>(null);
   const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
+  const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
 
   useEffect(() => {
     setPosts(initialPosts);
@@ -79,6 +86,28 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
     };
   }, [supabase, user]);
 
+  useEffect(() => {
+    if (!supabase || !user) {
+      setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("profiles")
+      .select("nsfw_feed_mode")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) console.error(error);
+        if (!cancelled) {
+          setNsfwFeedMode(resolveNsfwFeedModeFromProfileRow(data));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, user]);
+
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
     setLoading(true);
@@ -87,6 +116,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
       const { data, error: fetchError } = await fetchFeedPosts(supabase, {
         filterTag: tag,
         viewerUserId: user?.id ?? null,
+        excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
       });
       if (fetchError) {
         setError(fetchError.message);
@@ -96,7 +126,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
     } finally {
       setLoading(false);
     }
-  }, [supabase, tag, user?.id]);
+  }, [supabase, tag, user?.id, nsfwFeedMode]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -254,6 +284,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
         onPostDeleted={loadPosts}
         onPostUpdated={loadPosts}
         viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
+        nsfwFeedMode={nsfwFeedMode}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">
