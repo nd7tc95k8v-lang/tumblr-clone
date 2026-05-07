@@ -51,6 +51,8 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
   const [followStats, setFollowStats] = useState<ProfileFollowStats>(initialFollowStats);
   /** When false, fetch only originals (`reblog_of` null); quote reblogs are hidden too. */
   const [showReblogs, setShowReblogs] = useState(true);
+  /** Signed-in viewer’s posting default — not `localProfile` when browsing someone else’s blog. */
+  const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
 
   useEffect(() => {
     setLocalProfile(profile);
@@ -76,6 +78,31 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
     });
     return () => subscription.unsubscribe();
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      setViewerDefaultPostsNsfw(false);
+      return;
+    }
+    if (user.id === localProfile.id) {
+      setViewerDefaultPostsNsfw(Boolean(localProfile.default_posts_nsfw));
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("profiles")
+      .select("default_posts_nsfw")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) console.error(error);
+        setViewerDefaultPostsNsfw(Boolean(data?.default_posts_nsfw));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, user, localProfile.id, localProfile.default_posts_nsfw]);
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
@@ -322,12 +349,13 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               showReblog={showReblog}
               supabase={supabase}
               currentUserId={user?.id ?? null}
+              viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
               onPostDeleted={loadPosts}
               onPostUpdated={loadPosts}
-              onReblog={async (p, commentary, tags) => {
+              onReblog={async (p, commentary, tags, editorMarksMature) => {
                 setRebloggingId(p.id);
                 try {
-                  return await handleReblog(p, commentary, tags);
+                  return await handleReblog(p, commentary, tags, editorMarksMature);
                 } finally {
                   setRebloggingId(null);
                 }

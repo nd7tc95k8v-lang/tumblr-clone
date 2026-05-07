@@ -27,6 +27,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
   const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
+  const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +52,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
 
       if (!u) {
         setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+        setViewerDefaultPostsNsfw(false);
         setPosts(initialPosts);
         setError(initialLoadError);
         setLoading(false);
@@ -59,7 +61,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
 
       const { data: prof, error: profErr } = await supabase
         .from("profiles")
-        .select("nsfw_feed_mode")
+        .select("nsfw_feed_mode, default_posts_nsfw")
         .eq("id", u.id)
         .maybeSingle();
       if (seq !== bootstrapSeq.current) return;
@@ -69,6 +71,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
 
       const mode = resolveNsfwFeedModeFromProfileRow(prof);
       setNsfwFeedMode(mode);
+      setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
 
       const { data, error: fetchError } = await fetchFeedPosts(supabase, {
         viewerUserId: u.id,
@@ -109,11 +112,17 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
     if (!u) {
       setPosts(initialPosts);
       setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+      setViewerDefaultPostsNsfw(false);
       return;
     }
-    const { data: prof } = await supabase.from("profiles").select("nsfw_feed_mode").eq("id", u.id).maybeSingle();
+    const { data: prof } = await supabase
+      .from("profiles")
+      .select("nsfw_feed_mode, default_posts_nsfw")
+      .eq("id", u.id)
+      .maybeSingle();
     const mode = resolveNsfwFeedModeFromProfileRow(prof);
     setNsfwFeedMode(mode);
+    setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
     const { data, error: fetchError } = await fetchFeedPosts(supabase, {
       viewerUserId: u.id,
       excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
@@ -122,7 +131,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
   }, [supabase, initialPosts]);
 
   const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[]) => {
+    async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
       if (!supabase) return false;
       const {
         data: { user: u },
@@ -136,7 +145,11 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
       await runProtectedAction(supabase, { kind: "reblog" }, async () => {
         const { error: insertError } = await supabase.from("posts").insert({
           user_id: u.id,
-          ...reblogInsertFields(original, { commentary, tags: tags ?? [] }),
+          ...reblogInsertFields(original, {
+            commentary,
+            tags: tags ?? [],
+            editorMarksMature: commentary === null ? undefined : editorMarksMature,
+          }),
         });
         if (insertError) {
           console.error(insertError);
@@ -185,17 +198,19 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
               setUser(u);
               if (!u) {
                 setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+                setViewerDefaultPostsNsfw(false);
                 setPosts(initialPosts);
                 setError(initialLoadError);
                 return;
               }
               const { data: prof } = await supabase
                 .from("profiles")
-                .select("nsfw_feed_mode")
+                .select("nsfw_feed_mode, default_posts_nsfw")
                 .eq("id", u.id)
                 .maybeSingle();
               const mode = resolveNsfwFeedModeFromProfileRow(prof);
               setNsfwFeedMode(mode);
+              setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
               const { data, error: fetchError } = await fetchFeedPosts(supabase, {
                 viewerUserId: u.id,
                 excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
@@ -219,6 +234,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
         onPostDeleted={() => void refreshSignedInFeed()}
         onPostUpdated={() => void refreshSignedInFeed()}
         nsfwFeedMode={nsfwFeedMode}
+        viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">

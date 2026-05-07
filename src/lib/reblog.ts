@@ -12,6 +12,11 @@ export type ReblogInsertOptions = {
    * Do not pass the source post’s tags unless intentionally re-sharing them.
    */
   tags?: string[] | null;
+  /**
+   * Editor reblog path only (`commentary` is a string). When parent is SFW, sets insert `is_nsfw` hint so the
+   * trigger can honor explicit mature marking; Quick reblogs omit this.
+   */
+  editorMarksMature?: boolean;
 };
 
 /** Fields for inserting a reblog of `source` (immediate parent = source row). */
@@ -23,6 +28,15 @@ export function reblogInsertFields(source: FeedPost, options?: ReblogInsertOptio
       : source.id;
   const commentaryTrim = options?.commentary?.trim() ?? "";
   const tags = coercePostTags(options?.tags);
+  /**
+   * Quick reblog passes `commentary: null`; the modal must pass a string (use "" when empty)
+   * so profile default_posts_nsfw still applies on “reblog from editor”.
+   */
+  const reblog_passive_quick = options?.commentary === null;
+  const editorMarksMature =
+    !reblog_passive_quick && Boolean(options?.editorMarksMature);
+  /** Client hint before trigger ORs profile default (editor path) / passive-quick rules */
+  const is_nsfw = Boolean(source.is_nsfw) || editorMarksMature;
   return {
     content,
     image_url: imageSrc ?? source.image_url ?? null,
@@ -31,8 +45,9 @@ export function reblogInsertFields(source: FeedPost, options?: ReblogInsertOptio
     original_post_id: rootId,
     tags,
     reblog_commentary: commentaryTrim.length > 0 ? commentaryTrim : null,
+    reblog_passive_quick,
     /** Hint only; DB trigger forces true if parent `is_nsfw` (inheritance). */
-    is_nsfw: Boolean(source.is_nsfw),
+    is_nsfw,
   };
 }
 
@@ -97,9 +112,14 @@ export function buildOptimisticReblogFeedPost(input: {
   source: FeedPost;
   commentary?: string | null;
   tags?: string[] | null;
+  editorMarksMature?: boolean;
 }): FeedPost {
-  const { newId, viewerUserId, viewerAuthor, source, commentary, tags } = input;
-  const insertFields = reblogInsertFields(source, { commentary, tags });
+  const { newId, viewerUserId, viewerAuthor, source, commentary, tags, editorMarksMature } = input;
+  const insertFields = reblogInsertFields(source, {
+    commentary,
+    tags,
+    editorMarksMature,
+  });
   const chainLookup = collectChainLookupFromFeedPost(source);
   const created_at = new Date().toISOString();
   const quoted_post = buildQuotedPostChain({ id: newId, reblog_of: source.id }, chainLookup);

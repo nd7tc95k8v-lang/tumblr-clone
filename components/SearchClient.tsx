@@ -74,6 +74,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
 
   const [user, setUser] = useState<User | null>(null);
   const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
+  const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
   /** Signed-in: empty until session + `nsfw_feed_mode` resolved so SSR anon hits never flash for `hide`. */
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [users, setUsers] = useState<SearchUserResult[]>(initialUsers);
@@ -130,6 +131,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
 
       if (!u) {
         setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
+        setViewerDefaultPostsNsfw(false);
         setSignedInFeedPrefsReady(true);
         setPosts(initialPostsRef.current);
         setError(initialLoadErrorRef.current);
@@ -141,12 +143,13 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       setPosts([]);
       const { data: prof, error: profErr } = await supabase
         .from("profiles")
-        .select("nsfw_feed_mode")
+        .select("nsfw_feed_mode, default_posts_nsfw")
         .eq("id", u.id)
         .maybeSingle();
       if (seq !== searchBootstrapSeq.current) return;
       if (profErr) console.error(profErr);
       setNsfwFeedMode(resolveNsfwFeedModeFromProfileRow(prof));
+      setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
       setSignedInFeedPrefsReady(true);
       setSessionChecked(true);
     };
@@ -325,7 +328,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
   );
 
   const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[]) => {
+    async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
       if (!supabase) return false;
       const {
         data: { user: u },
@@ -339,7 +342,11 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       await runProtectedAction(supabase, { kind: "reblog" }, async () => {
         const { error: insertError } = await supabase.from("posts").insert({
           user_id: u.id,
-          ...reblogInsertFields(original, { commentary, tags: tags ?? [] }),
+          ...reblogInsertFields(original, {
+            commentary,
+            tags: tags ?? [],
+            editorMarksMature: commentary === null ? undefined : editorMarksMature,
+          }),
         });
         if (insertError) {
           console.error(insertError);
@@ -546,6 +553,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
           onPostDeleted={loadPosts}
           onPostUpdated={loadPosts}
           nsfwFeedMode={nsfwFeedMode}
+          viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
         />
       ) : (
         <p className="max-w-md text-center text-sm leading-relaxed text-text-secondary">

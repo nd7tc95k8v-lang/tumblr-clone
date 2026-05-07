@@ -40,6 +40,25 @@ This document breaks work into **ordered phases**. Each phase lists **goals**, *
 - `components/ReblogModal.tsx`, `components/useReblogAction.ts`, `components/PostCard.tsx` (primary vs **Quick** instant control)
 - `src/lib/reblog.ts` (`reblogInsertFields` + `tags`), `src/lib/tags.ts` (`parseCommaSeparatedTags`, `displayTagsForPost`)
 
+### Migration `036` — Quick vs editor reblog (`reblog_passive_quick`)
+
+**What it is.** Column `posts.reblog_passive_quick` (boolean, default `false`) plus trigger logic in `posts_enforce_nsfw()` (`supabase/migrations/036_posts_reblog_passive_quick_nsfw.sql`). **`reblog_passive_quick` is insert-/trigger-facing metadata.** The UI and feed hydrate on **`posts.is_nsfw`** only; **`FeedPost`** and **`POST_FEED_BASE_SELECT`** in `src/lib/supabase/fetch-feed-posts.ts` intentionally **omit** `reblog_passive_quick` — no badge or branching reads it today.
+
+**TypeScript DB types.** This repo does not ship vendored/generated Supabase `Database` types; nothing must be regenerated locally for 036 unless you introduce codegen later — then rerun your generator after applying the migration.
+
+**Deploy order.**
+
+1. **Apply migration 036 first** on the Supabase database (column + trigger replacement).
+2. **Then** ship the client that sends `reblog_passive_quick` on reblog inserts (via `reblogInsertFields` in `src/lib/reblog.ts`).
+3. **If the client lands before the migration:** inserts that include `reblog_passive_quick` can fail PostgREST (unknown column).
+
+**Stale / older clients.** Inserts that **omit** `reblog_passive_quick` get the column default **`false`** — same NSFW formula as **pre-036** Quick reblogs (profile `default_posts_nsfw` still applies).
+
+**Trust boundary.**
+
+- **`reblog_passive_quick` is client-provided** on insert. When `true`, the trigger **skips** applying `profiles.default_posts_nsfw` for reblogs whose **immediate parent is not NSFW**.
+- **Not weakened by the client:** Immediate parent **`is_nsfw`** still forces child **`is_nsfw`** (`nsfw_source` `parent_chain`); **`UPDATE`** semantics still forbid clearing mature once set (same immutability as before).
+
 ---
 
 ## Phase 2 — Unified Notes

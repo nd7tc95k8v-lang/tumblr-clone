@@ -6,7 +6,7 @@ export type ProfilePublic = {
   display_name: string | null;
   bio: string | null;
   avatar_url: string | null;
-  /** Public “this blog is mature” label; independent of default post NSFW. */
+  /** DB column mirrored in the app shape; not editable in settings (edit profile preserves the saved value). Separate from default post NSFW and feed visibility. */
   profile_is_nsfw: boolean;
   /** When true, new originals by this user are marked NSFW on insert (DB trigger). */
   default_posts_nsfw: boolean;

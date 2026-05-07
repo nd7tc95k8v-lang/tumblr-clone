@@ -120,6 +120,25 @@ function QuoteBubbleIcon({ className }: { className?: string }) {
   );
 }
 
+/** Mobile icon for permalink when the word “Link” is `sm+` only. */
+function PermalinkChainIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={className}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
 /** User-added commentary on quote reblogs — distinct from nested quoted content. */
 const COMMENTARY_ADDED_LAYER_BASE =
   "rounded-r-card border-l-2 border-electric-purple/35 bg-surface-blue/55 py-2 pl-3 pr-2";
@@ -154,10 +173,6 @@ const QUOTE_REBLOG_ADDON_CLASS =
 /** Matches {@link QuotedPostNest} layer row — avatar + content column. */
 const QUOTE_REBLOG_LATEST_LAYER_ROW_CLASS = "flex gap-1.5 sm:gap-2";
 
-/** Tabular count slot — avoids horizontal nudge when digits change. */
-const STAT_COUNT_CLASS =
-  "inline-block min-w-[3ch] text-right tabular-nums transition-colors duration-200 ease-out";
-
 const REBLOG_ACTION_CLASS =
   "inline-flex min-h-[1.75rem] min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-meta font-medium text-text-secondary transition-[color,background-color,transform,box-shadow] duration-200 ease-out hover:text-link hover:bg-bg-secondary/60 active:scale-[0.97] active:bg-bg-secondary/75 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50";
 
@@ -179,8 +194,8 @@ const REBLOG_INSTANT_SECONDARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_R
 /** Like control: same hit/text tuning; color still from liked / muted state. */
 const LIKE_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE}`;
 
-/** Reblog count row (non-button): only typography + gap. */
-const REBLOG_STAT_ROW_COMPACT = `${ACTION_TEXT_MOBILE} max-md:gap-1`;
+/** Footer second row: comfortable tap targets, no wrap on typical phones. */
+const FOOTER_ACTIONS_ROW = "mt-2 flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto sm:gap-3";
 
 /**
  * Quote-style commentary that stays visible above the gate when the row is NSFW and this text is
@@ -225,7 +240,14 @@ function NsfwFeedContentWarning({ onReveal }: { onReveal: () => void }) {
 type Props = {
   post: FeedPost;
   rebloggingId: string | null;
-  onReblog: (post: FeedPost, commentary?: string | null, tags?: string[]) => boolean | Promise<boolean>;
+  onReblog: (
+    post: FeedPost,
+    commentary?: string | null,
+    tags?: string[],
+    editorMarksMature?: boolean,
+  ) => boolean | Promise<boolean>;
+  /** Default checked state for modal “Mark this reblog mature” when source is SFW. */
+  viewerDefaultPostsNsfw?: boolean;
   showReblog?: boolean;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
@@ -419,6 +441,7 @@ export default function PostCard({
   onPostUpdated,
   nsfwFeedMode,
   hidePermalink = false,
+  viewerDefaultPostsNsfw = false,
 }: Props) {
   const [reblogModalPost, setReblogModalPost] = useState<FeedPost | null>(null);
   const [reblogModalBusy, setReblogModalBusy] = useState(false);
@@ -1102,15 +1125,25 @@ export default function PostCard({
             onDismiss={() => setDeleteError(null)}
             className="mt-2.5"
           />
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 max-md:gap-x-1.5 max-md:gap-y-1 sm:mt-3 sm:gap-x-2.5">
-              <time
-                dateTime={post.created_at}
-                title={postTime.full}
-                aria-label={postTime.full}
-                className="max-w-[11rem] max-md:max-w-[9.25rem] shrink-0 truncate text-left text-meta max-md:text-[0.6875rem] font-medium tabular-nums tracking-tight text-text-secondary max-md:tracking-normal"
+          <div className="mt-2.5 border-t border-border/45 pt-2.5 sm:mt-3 sm:pt-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <button
+                type="button"
+                disabled={!supabase}
+                onClick={() => {
+                  setNotesModalFocusComposer(false);
+                  setNotesModalOpen(true);
+                }}
+                className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none text-left disabled:pointer-events-none disabled:opacity-45`}
+                aria-haspopup="dialog"
+                aria-expanded={notesModalOpen}
+                aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
+                title={!supabase ? "Notes unavailable" : undefined}
               >
-                {postTime.label}
-              </time>
+                <span className="tabular-nums">
+                  {notesTriggerTotal} {notesTriggerTotal === 1 ? "note" : "notes"}
+                </span>
+              </button>
               {showNsfwUnGatedBadge ? (
                 <span
                   className="shrink-0 rounded-full border border-border/60 bg-bg-secondary/65 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-text-muted dark:border-border/50 dark:bg-bg-secondary/80"
@@ -1120,92 +1153,46 @@ export default function PostCard({
                   NSFW
                 </span>
               ) : null}
-              <span className="mx-0.5 max-md:mx-0 h-3 w-px shrink-0 bg-border/50" aria-hidden />
-              <div className="flex min-h-[1.5rem] flex-wrap items-center gap-x-2 gap-y-0.5 sm:gap-x-3">
-                <button
-                  type="button"
-                  disabled={!currentUserId || likeBusy}
-                  onClick={() => void toggleLike()}
-                  className={`inline-flex min-h-[1.75rem] min-w-0 touch-manipulation select-none items-center justify-center gap-1.5 rounded-md px-1.5 py-0.5 text-meta font-medium tabular-nums transition-[color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 active:scale-95 disabled:pointer-events-none ${LIKE_ACTION_ROW_COMPACT} ${
-                    !currentUserId ? "cursor-not-allowed disabled:opacity-45" : "disabled:opacity-100"
-                  } ${likeBusy ? "cursor-wait" : currentUserId ? "cursor-pointer" : ""} ${
-                    liked ? "text-accent-pink" : "text-text-secondary hover:text-text"
-                  }`}
-                  aria-pressed={liked}
-                  aria-busy={likeBusy}
-                  aria-label={currentUserId ? (liked ? "Unlike" : "Like") : "Sign in to like"}
-                  title={currentUserId ? undefined : "Sign in to like"}
-                >
-                  <span
-                    className={`inline-flex h-4 w-4 origin-center items-center justify-center will-change-transform ${
-                      liked
-                        ? "scale-110 transition-transform duration-200 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
-                        : "scale-100 transition-transform duration-200 ease-out"
-                    }`}
-                    aria-hidden
-                  >
-                    <HeartIcon active={liked} className={ICON_BOX} />
-                  </span>
-                  <span className={STAT_COUNT_CLASS}>{Math.max(0, likeCount)}</span>
-                </button>
+              <time
+                dateTime={post.created_at}
+                title={postTime.full}
+                aria-label={postTime.full}
+                className="ml-auto max-w-[11rem] shrink-0 truncate text-right text-meta font-medium tabular-nums tracking-tight text-text-secondary max-md:max-w-[9.25rem] max-md:text-[0.6875rem] max-md:tracking-normal"
+              >
+                {postTime.label}
+              </time>
+            </div>
+
+            <div className={FOOTER_ACTIONS_ROW}>
+              <button
+                type="button"
+                disabled={!currentUserId || likeBusy}
+                onClick={() => void toggleLike()}
+                className={`inline-flex min-h-[2rem] min-w-0 shrink-0 touch-manipulation select-none items-center justify-center gap-1.5 rounded-md px-2 py-1 text-meta font-medium transition-[color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 active:scale-95 disabled:pointer-events-none ${LIKE_ACTION_ROW_COMPACT} ${
+                  !currentUserId ? "cursor-not-allowed disabled:opacity-45" : "disabled:opacity-100"
+                } ${likeBusy ? "cursor-wait" : currentUserId ? "cursor-pointer" : ""} ${
+                  liked ? "text-accent-pink" : "text-text-secondary hover:text-text"
+                }`}
+                aria-pressed={liked}
+                aria-busy={likeBusy}
+                aria-label={currentUserId ? (liked ? "Unlike" : "Like") : "Sign in to like"}
+                title={currentUserId ? undefined : "Sign in to like"}
+              >
                 <span
-                  className={`inline-flex items-center justify-center gap-1.5 px-0.5 py-0.5 text-meta font-medium tabular-nums text-text-secondary ${REBLOG_STAT_ROW_COMPACT}`}
-                  title="Reblogs on this thread"
+                  className={`inline-flex h-4 w-4 shrink-0 origin-center items-center justify-center will-change-transform ${
+                    liked
+                      ? "scale-110 transition-transform duration-200 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
+                      : "scale-100 transition-transform duration-200 ease-out"
+                  }`}
+                  aria-hidden
                 >
-                  <span className="inline-flex h-4 w-4 items-center justify-center text-text-secondary" aria-hidden>
-                    <RepostStatIcon className={ICON_BOX} />
-                  </span>
-                  <span className={STAT_COUNT_CLASS}>{reblogCount}</span>
+                  <HeartIcon active={liked} className={ICON_BOX} />
                 </span>
-                <button
-                  type="button"
-                  disabled={!supabase}
-                  onClick={() => {
-                    setNotesModalFocusComposer(true);
-                    setNotesModalOpen(true);
-                  }}
-                  className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
-                  aria-haspopup="dialog"
-                  aria-expanded={notesModalOpen}
-                  aria-label="Leave a short note on this thread"
-                  title={!supabase ? "Notes unavailable" : "Leave a short note — opens Notes with the composer ready"}
-                >
-                  <span className="inline-flex h-4 w-4 items-center justify-center text-text-secondary" aria-hidden>
-                    <ShortNoteComposeIcon className={ICON_BOX} />
-                  </span>
-                  <span className="hidden sm:inline">Note</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!supabase}
-                  onClick={() => {
-                    setNotesModalFocusComposer(false);
-                    setNotesModalOpen(true);
-                  }}
-                  className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
-                  aria-haspopup="dialog"
-                  aria-expanded={notesModalOpen}
-                  aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
-                  title={!supabase ? "Notes unavailable" : undefined}
-                >
-                  <span className="tabular-nums">
-                    {notesTriggerTotal} {notesTriggerTotal === 1 ? "note" : "notes"}
-                  </span>
-                </button>
-                {!hidePermalink ? (
-                  <Link
-                    href={postPermalinkPath(post.id)}
-                    className="shrink-0 text-meta font-medium tabular-nums text-text-secondary/75 underline-offset-2 hover:text-link hover:underline max-md:text-[0.6875rem]"
-                    title="Open post page (shareable link)"
-                    aria-label="Open post permalink"
-                    prefetch={false}
-                  >
-                    Link
-                  </Link>
-                ) : null}
-              </div>
+                <span className="hidden sm:inline">{liked ? "Unlike" : "Like"}</span>
+              </button>
+
               {showReblog ? (
-                <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 max-md:gap-x-1 sm:ml-0.5">
+                <>
                   <button
                     type="button"
                     disabled={rebloggingId !== null || reblogModalBusy}
@@ -1213,7 +1200,7 @@ export default function PostCard({
                       setReblogModalError(null);
                       setReblogModalPost(post);
                     }}
-                    className={`${REBLOG_EDITOR_PRIMARY_CLASS} touch-manipulation select-none ${
+                    className={`${REBLOG_EDITOR_PRIMARY_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
                       reblogModalBusy
                         ? "cursor-wait border-border/45 bg-bg-secondary/50 opacity-95 ring-1 ring-border/40"
                         : "cursor-pointer"
@@ -1226,10 +1213,10 @@ export default function PostCard({
                     }
                     title="Reblog to your blog; add optional commentary and tags"
                   >
-                    <span className="inline-flex h-4 w-4 items-center justify-center shrink-0" aria-hidden>
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
                       <QuoteBubbleIcon className={ICON_BOX} />
                     </span>
-                    <span>{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
+                    <span className="hidden sm:inline">{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
                   </button>
                   <button
                     type="button"
@@ -1238,7 +1225,7 @@ export default function PostCard({
                       setReblogModalError(null);
                       void onReblog(post, null);
                     }}
-                    className={`${REBLOG_INSTANT_SECONDARY_CLASS} touch-manipulation select-none ${
+                    className={`${REBLOG_INSTANT_SECONDARY_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
                       rebloggingId === post.id
                         ? "cursor-wait bg-bg-secondary/40 opacity-90 ring-1 ring-border/35"
                         : "cursor-pointer"
@@ -1251,13 +1238,48 @@ export default function PostCard({
                     }
                     title="Instant reblog without opening the editor"
                   >
-                    <span className="inline-flex h-4 w-4 items-center justify-center shrink-0" aria-hidden>
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
                       <RepostStatIcon className={ICON_BOX} />
                     </span>
-                    <span>{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
+                    <span className="hidden sm:inline">{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
                   </button>
-                </span>
+                </>
               ) : null}
+
+              <button
+                type="button"
+                disabled={!supabase}
+                onClick={() => {
+                  setNotesModalFocusComposer(true);
+                  setNotesModalOpen(true);
+                }}
+                className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] shrink-0 touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
+                aria-haspopup="dialog"
+                aria-expanded={notesModalOpen}
+                aria-label="Leave a short note on this thread"
+                title={!supabase ? "Notes unavailable" : "Leave a short note — opens Notes with the composer ready"}
+              >
+                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                  <ShortNoteComposeIcon className={ICON_BOX} />
+                </span>
+                <span className="hidden sm:inline">Note</span>
+              </button>
+
+              {!hidePermalink ? (
+                <Link
+                  href={postPermalinkPath(post.id)}
+                  className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] shrink-0 text-text-secondary/90 underline-offset-2 hover:bg-bg-secondary/60 hover:text-link hover:underline max-md:text-[0.6875rem]`}
+                  title="Open post page (shareable link)"
+                  aria-label="Open post permalink"
+                  prefetch={false}
+                >
+                  <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                    <PermalinkChainIcon className={ICON_BOX} />
+                  </span>
+                  <span className="hidden sm:inline">Link</span>
+                </Link>
+              ) : null}
+
               {isOwner ? (
                 <div className="ml-auto shrink-0">
                   <details
@@ -1265,7 +1287,7 @@ export default function PostCard({
                     className={`group relative ${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}
                   >
                     <summary
-                      className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} list-none [&::-webkit-details-marker]:hidden ${
+                      className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] list-none [&::-webkit-details-marker]:hidden ${
                         ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
                       }`}
                       aria-label="Post options"
@@ -1323,16 +1345,18 @@ export default function PostCard({
                   </details>
                 </div>
               ) : null}
-              {process.env.NODE_ENV === "development" &&
-              typeof post.anchor_note_comment_count === "number" &&
-              post.anchor_note_comment_count !== post.note_comment_count ? (
-                <span
-                  className="basis-full text-[0.625rem] leading-tight text-text-muted/70 font-mono tabular-nums"
-                  title="Diagnostic: hydrated thread-root vs anchor-scoped note comment counts (development only)"
-                >
-                  dev: notes root {post.note_comment_count} / anchor {post.anchor_note_comment_count}
-                </span>
-              ) : null}
+            </div>
+
+            {process.env.NODE_ENV === "development" &&
+            typeof post.anchor_note_comment_count === "number" &&
+            post.anchor_note_comment_count !== post.note_comment_count ? (
+              <span
+                className="mt-1.5 block text-[0.625rem] leading-tight text-text-muted/70 font-mono tabular-nums"
+                title="Diagnostic: hydrated thread-root vs anchor-scoped note comment counts (development only)"
+              >
+                dev: notes root {post.note_comment_count} / anchor {post.anchor_note_comment_count}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -1357,6 +1381,7 @@ export default function PostCard({
       <ReblogModal
         post={reblogModalPost}
         busy={reblogModalBusy}
+        viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
         errorMessage={reblogModalError}
         onDismissError={() => setReblogModalError(null)}
         onClose={() => {
@@ -1364,7 +1389,7 @@ export default function PostCard({
           setReblogModalError(null);
           setReblogModalPost(null);
         }}
-        onConfirm={async ({ commentary, tags }) => {
+        onConfirm={async ({ commentary, tags, isNsfw }) => {
           if (!reblogModalPost) return;
           const trimmed = commentary.trim();
           const guard = validateUserWrittenContent(trimmed, { allowEmpty: true });
@@ -1375,11 +1400,9 @@ export default function PostCard({
           setReblogModalError(null);
           setReblogModalBusy(true);
           try {
-            const ok = await onReblog(
-              reblogModalPost,
-              trimmed.length > 0 ? trimmed : null,
-              tags,
-            );
+            const editorMarksMature =
+              reblogModalPost.is_nsfw === true ? false : Boolean(isNsfw);
+            const ok = await onReblog(reblogModalPost, trimmed, tags, editorMarksMature);
             if (ok && trimmed.length > 0) {
               recordSuccessfulUserWrittenPost(normalizePostBodyForDedup(trimmed));
             }

@@ -11,7 +11,14 @@ type Props = {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
-  onReblog: (post: FeedPost, commentary?: string | null, tags?: string[]) => boolean | Promise<boolean>;
+  onReblog: (
+    post: FeedPost,
+    commentary?: string | null,
+    tags?: string[],
+    editorMarksMature?: boolean,
+  ) => boolean | Promise<boolean>;
+  /** Default for “Mark this reblog as mature” when opening the modal (SFW sources only). */
+  viewerDefaultPostsNsfw?: boolean;
   showReblog?: boolean;
   supabase: SupabaseClient | null;
   currentUserId: string | null;
@@ -55,6 +62,7 @@ const Feed: React.FC<Props> = ({
   onPostDeleted,
   onPostUpdated,
   nsfwFeedMode,
+  viewerDefaultPostsNsfw = false,
 }) => {
   const [rebloggingId, setRebloggingId] = useState<string | null>(null);
   if (loading && posts.length === 0) {
@@ -131,14 +139,15 @@ const Feed: React.FC<Props> = ({
             supabase={supabase}
             currentUserId={currentUserId}
             searchHighlightTags={postSearchHighlightTags}
-            onReblog={async (p, commentary, tags) => {
+            onReblog={async (p, commentary, tags, editorMarksMature) => {
               setRebloggingId(p.id);
               try {
-                return await onReblog(p, commentary, tags);
+                return await onReblog(p, commentary, tags, editorMarksMature);
               } finally {
                 setRebloggingId(null);
               }
             }}
+            viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
             onPostDeleted={onPostDeleted}
             onPostUpdated={onPostUpdated}
             nsfwFeedMode={nsfwFeedMode}

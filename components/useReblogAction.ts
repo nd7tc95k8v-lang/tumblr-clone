@@ -26,11 +26,22 @@ export type UseReblogActionOptions = {
 export function useReblogAction(
   supabase: SupabaseClient | null,
   { onSuccess, onOptimisticFeedPost, getViewerAuthor }: UseReblogActionOptions,
-): (original: FeedPost, commentary?: string | null, tags?: string[]) => Promise<boolean> {
+): (
+  original: FeedPost,
+  commentary?: string | null,
+  tags?: string[],
+  /** Editor reblog only; ignored when `commentary === null` (Quick). */
+  editorMarksMature?: boolean,
+) => Promise<boolean> {
   const { runProtectedAction } = useActionGuard();
 
   return useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[]) => {
+    async (
+      original: FeedPost,
+      commentary?: string | null,
+      tags?: string[],
+      editorMarksMature?: boolean,
+    ) => {
       if (!supabase) return false;
       const {
         data: { user },
@@ -49,7 +60,11 @@ export function useReblogAction(
         const { error } = await supabase.from("posts").insert({
           id: newPostId,
           user_id: user.id,
-          ...reblogInsertFields(original, { commentary, tags: reblogTags }),
+          ...reblogInsertFields(original, {
+            commentary,
+            tags: reblogTags,
+            editorMarksMature: commentary === null ? undefined : editorMarksMature,
+          }),
         });
         if (error) {
           console.error(error);
@@ -64,6 +79,7 @@ export function useReblogAction(
           source: original,
           commentary,
           tags: reblogTags,
+          editorMarksMature: commentary === null ? undefined : editorMarksMature,
         });
         await onOptimisticFeedPost?.(optimistic);
         await onSuccess();

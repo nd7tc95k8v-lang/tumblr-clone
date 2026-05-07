@@ -34,6 +34,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
   const [tagFollowed, setTagFollowed] = useState<boolean | null>(null);
   const [tagFollowBusy, setTagFollowBusy] = useState(false);
   const [tagFollowError, setTagFollowError] = useState<string | null>(null);
+  const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
 
   useEffect(() => {
     setPosts(initialPosts);
@@ -55,6 +56,28 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
     });
     return () => subscription.unsubscribe();
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      setViewerDefaultPostsNsfw(false);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("profiles")
+      .select("default_posts_nsfw")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!cancelled) {
+          if (error) console.error(error);
+          setViewerDefaultPostsNsfw(Boolean(data?.default_posts_nsfw));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, user]);
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
@@ -130,7 +153,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
   }, [supabase, user, tag, tagFollowBusy, tagFollowed]);
 
   const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[]) => {
+    async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
       if (!supabase) return false;
       const {
         data: { user: u },
@@ -144,7 +167,11 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
       await runProtectedAction(supabase, { kind: "reblog" }, async () => {
         const { error: insertError } = await supabase.from("posts").insert({
           user_id: u.id,
-          ...reblogInsertFields(original, { commentary, tags: tags ?? [] }),
+          ...reblogInsertFields(original, {
+            commentary,
+            tags: tags ?? [],
+            editorMarksMature: commentary === null ? undefined : editorMarksMature,
+          }),
         });
         if (insertError) {
           console.error(insertError);
@@ -226,6 +253,7 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
         currentUserId={user?.id ?? null}
         onPostDeleted={loadPosts}
         onPostUpdated={loadPosts}
+        viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">

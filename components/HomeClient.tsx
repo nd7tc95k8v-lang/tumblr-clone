@@ -494,6 +494,7 @@ function ClientShell() {
             error={postsError}
             onRetry={loadPosts}
             onReblog={handleReblog}
+            viewerDefaultPostsNsfw={Boolean(profile?.default_posts_nsfw)}
             showReblog
             supabase={supabase}
             currentUserId={user?.id ?? null}

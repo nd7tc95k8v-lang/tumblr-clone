@@ -27,6 +27,7 @@ export default function PostPermalinkClient({ postId, initialPost }: Props) {
   const [post, setPost] = useState<FeedPost>(initialPost);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [rebloggingId, setRebloggingId] = useState<string | null>(null);
+  const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
 
   useEffect(() => {
     setPost(initialPost);
@@ -44,6 +45,28 @@ export default function PostPermalinkClient({ postId, initialPost }: Props) {
     });
     return () => subscription.unsubscribe();
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase || !user) {
+      setViewerDefaultPostsNsfw(false);
+      return;
+    }
+    let cancelled = false;
+    void supabase
+      .from("profiles")
+      .select("default_posts_nsfw")
+      .eq("id", user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!cancelled) {
+          if (error) console.error(error);
+          setViewerDefaultPostsNsfw(Boolean(data?.default_posts_nsfw));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, user]);
 
   const loadPost = useCallback(async () => {
     if (!supabase) return;
@@ -106,10 +129,11 @@ export default function PostPermalinkClient({ postId, initialPost }: Props) {
           supabase={supabase}
           currentUserId={user?.id ?? null}
           hidePermalink
-          onReblog={async (p, commentary, tags) => {
+          viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
+          onReblog={async (p, commentary, tags, editorMarksMature) => {
             setRebloggingId(p.id);
             try {
-              return await handleReblog(p, commentary, tags);
+              return await handleReblog(p, commentary, tags, editorMarksMature);
             } finally {
               setRebloggingId(null);
             }

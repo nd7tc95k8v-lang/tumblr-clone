@@ -39,7 +39,6 @@ const FEED_NSFW_CHOICES: {
 export default function ContentSafetySettings({ supabase, user }: Props) {
   const userId = user.id;
 
-  const [profileIsNsfw, setProfileIsNsfw] = useState(false);
   const [defaultPostsNsfw, setDefaultPostsNsfw] = useState(false);
   const [profileFieldsLoading, setProfileFieldsLoading] = useState(true);
   const [contentSaveBusy, setContentSaveBusy] = useState(false);
@@ -65,7 +64,7 @@ export default function ContentSafetySettings({ supabase, user }: Props) {
     const { data, error } = await supabase
       .from("profiles")
       .select(
-        "profile_is_nsfw, default_posts_nsfw, nsfw_feed_mode, adult_content_status, adult_content_access_expires_at",
+        "default_posts_nsfw, nsfw_feed_mode, adult_content_status, adult_content_access_expires_at",
       )
       .eq("id", userId)
       .maybeSingle();
@@ -74,7 +73,6 @@ export default function ContentSafetySettings({ supabase, user }: Props) {
       setProfileFieldsLoading(false);
       return;
     }
-    setProfileIsNsfw(Boolean(data.profile_is_nsfw));
     setDefaultPostsNsfw(Boolean(data.default_posts_nsfw));
     setFeedMode(parseNsfwFeedMode(data.nsfw_feed_mode));
     setAdultStatus(data.adult_content_status ?? "unknown");
@@ -117,7 +115,7 @@ export default function ContentSafetySettings({ supabase, user }: Props) {
     })();
   };
 
-  const handleSaveProfileAndPosting = () => {
+  const handleSaveDefaultPostsNsfw = () => {
     void (async () => {
       setContentSaveBusy(true);
       setContentSaveError(null);
@@ -135,7 +133,6 @@ export default function ContentSafetySettings({ supabase, user }: Props) {
       const { error } = await supabase
         .from("profiles")
         .update({
-          profile_is_nsfw: profileIsNsfw,
           default_posts_nsfw: defaultPostsNsfw,
         })
         .eq("id", userId);
@@ -155,29 +152,9 @@ export default function ContentSafetySettings({ supabase, user }: Props) {
   return (
     <section className="flex flex-col gap-4">
       <h2 className="text-meta font-semibold uppercase tracking-wide text-text-muted">Content &amp; Safety</h2>
-      <p className="-mt-2 text-meta text-text-muted">These settings are independent.</p>
-
-      <div className="rounded-card border border-border bg-bg-secondary/80 p-4 flex flex-col gap-3">
-        <p className="font-heading text-sm font-semibold text-text">Profile</p>
-        <label className="flex cursor-pointer items-start gap-2.5 text-sm text-text">
-          <input
-            type="checkbox"
-            checked={profileIsNsfw}
-            onChange={(e) => {
-              setContentSaveMessage(null);
-              setProfileIsNsfw(e.target.checked);
-            }}
-            disabled={profileFieldsLoading || contentSaveBusy}
-            className="qrtz-checkbox"
-          />
-          <span>
-            <span className="font-medium">My profile is NSFW</span>
-            <span className="mt-1 block text-meta text-text-muted">
-              Public label only. Does not change existing posts or defaults.
-            </span>
-          </span>
-        </label>
-      </div>
+      <p className="-mt-2 text-meta text-text-muted">
+        Posting defaults, what you see in feeds, and adult access are separate—change one without affecting the others.
+      </p>
 
       <div className="rounded-card border border-border bg-bg-secondary/80 p-4 flex flex-col gap-3">
         <p className="font-heading text-sm font-semibold text-text">Posting</p>
@@ -193,19 +170,21 @@ export default function ContentSafetySettings({ supabase, user }: Props) {
             className="qrtz-checkbox"
           />
           <span>
-            <span className="font-medium">Mark my posts as NSFW by default</span>
-            <span className="mt-1 block text-meta text-text-muted">Applies to new posts you create.</span>
+            <span className="font-medium">Mark new posts mature by default</span>
+            <span className="mt-1 block text-meta leading-snug text-text-muted">
+              Only affects new posts you compose: the composer starts with mature marking on or off to match this. You can still change mature marking on each post before you publish.
+            </span>
+            <span className="mt-1.5 block text-meta leading-snug text-text-muted">
+              After a post is published, mature status cannot be removed (including on reblogs that inherit it).
+            </span>
           </span>
         </label>
-        <p className="text-meta text-text-muted">
-          Saves both the profile label and posting default in the sections above.
-        </p>
         {contentSaveError ? <p className="text-meta text-error">{contentSaveError}</p> : null}
         {contentSaveMessage ? <p className="text-meta text-success">{contentSaveMessage}</p> : null}
         <button
           type="button"
           disabled={profileFieldsLoading || contentSaveBusy}
-          onClick={handleSaveProfileAndPosting}
+          onClick={handleSaveDefaultPostsNsfw}
           className="qrtz-btn-primary self-start px-4 py-2 text-sm"
         >
           {contentSaveBusy ? "Saving…" : "Save changes"}
