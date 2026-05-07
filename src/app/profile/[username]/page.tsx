@@ -59,7 +59,7 @@ export default async function ProfilePage({ params }: PageProps) {
 
   const { data: profileRow, error: profileError } = await supabase
     .from("profiles")
-    .select("id, username, display_name, bio, avatar_url, profile_is_nsfw, default_posts_nsfw")
+    .select("id, username, display_name, bio, avatar_url, profile_is_nsfw, default_posts_nsfw, nsfw_feed_mode")
     .eq("username", normalized)
     .maybeSingle();
 
@@ -94,6 +94,7 @@ export default async function ProfilePage({ params }: PageProps) {
     avatar_url: profileRow.avatar_url?.trim() ? profileRow.avatar_url : null,
     profile_is_nsfw: Boolean(profileRow.profile_is_nsfw),
     default_posts_nsfw: Boolean(profileRow.default_posts_nsfw),
+    nsfw_feed_mode: profileRow.nsfw_feed_mode ?? null,
   };
 
   const [{ data: postsData }, { data: followStats }] = await Promise.all([

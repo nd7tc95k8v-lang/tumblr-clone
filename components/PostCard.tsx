@@ -1448,7 +1448,7 @@ export default function PostCard({
                     <div
                       ref={ownerMenuPopoverRef}
                       role="menu"
-                      className="fixed z-10 min-w-[9.5rem] -translate-x-full rounded-md border border-border/60 bg-bg-secondary py-1 shadow-md"
+                      className="fixed z-10 w-40 max-w-[calc(100vw-1rem)] -translate-x-full rounded-md border border-border/60 bg-bg-secondary py-0.5 shadow-md"
                       style={{ top: ownerMenuPos.top, left: ownerMenuPos.left }}
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => e.stopPropagation()}
@@ -1457,7 +1457,7 @@ export default function PostCard({
                         type="button"
                         role="menuitem"
                         disabled={ownerActionBusy || !supabase}
-                        className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                        className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                         onClick={handleOpenEditTags}
                       >
                         Edit tags
@@ -1467,7 +1467,7 @@ export default function PostCard({
                           type="button"
                           role="menuitem"
                           disabled={ownerActionBusy || !supabase}
-                          className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                          className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                           onClick={handleOpenEditText}
                         >
                           Edit text
@@ -1478,7 +1478,7 @@ export default function PostCard({
                           type="button"
                           role="menuitem"
                           disabled={ownerActionBusy || !supabase}
-                          className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                          className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                           onClick={handleOpenEditMedia}
                         >
                           Edit photos
@@ -1488,7 +1488,7 @@ export default function PostCard({
                         type="button"
                         role="menuitem"
                         disabled={ownerActionBusy || !supabase}
-                        className="w-full px-3 py-1.5 text-left text-sm font-medium text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                        className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                         onClick={() => void handleOwnerDelete()}
                       >
                         {deleteBusy ? "Deleting…" : "Delete"}

@@ -580,10 +580,7 @@ export default function PostNotesModal({
         {showEmpty ? (
           <div className="mb-4 rounded-card border border-dashed border-border/70 bg-bg-secondary/15 px-4 py-6 text-center dark:bg-bg-secondary/25">
             <p className="text-sm font-medium text-text">Quiet thread</p>
-            <p className="mt-1.5 text-meta leading-relaxed text-text-muted">
-              No likes or reblogs here yet. When people react, you will see them listed with a little context — like
-              Tumblr notes, tuned for Qrtz.
-            </p>
+            <p className="mt-1.5 text-meta leading-relaxed text-text-muted">No Likes or Reblogs yet</p>
           </div>
         ) : null}
 
