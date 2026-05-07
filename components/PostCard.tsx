@@ -22,6 +22,7 @@ import {
   resolvePlainReblogDisplay,
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
+import LinkedPostText from "./LinkedPostText";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 import PostMediaGallery from "./PostMediaGallery";
 import {
@@ -1068,11 +1069,17 @@ export default function PostCard({
           ) : null}
           {ungatedCommentary ? (
             <div className={COMMENTARY_ADDED_LAYER_CLASS}>
-              <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">{ungatedCommentary}</p>
+              <LinkedPostText
+                text={ungatedCommentary}
+                className="text-[0.9375rem] leading-relaxed text-text"
+              />
             </div>
           ) : quoteLayer && commentary && !showNestedQuote ? (
             <div className={COMMENTARY_ADDED_LAYER_CLASS}>
-              <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">{commentary}</p>
+              <LinkedPostText
+                text={commentary}
+                className="text-[0.9375rem] leading-relaxed text-text"
+              />
             </div>
           ) : null}
           {nsfwFeedBodyHidden ? (
@@ -1089,14 +1096,20 @@ export default function PostCard({
               ) : null}
               {!isReblog ? (
                 <>
-                  <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{post.content}</p>
+                  <LinkedPostText
+                    text={post.content}
+                    className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                  />
                   <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-2.5" />
                 </>
               ) : null}
               {plainResolved?.kind === "flat" ? (
                 <>
                   {plainResolved.leaf.content ? (
-                    <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{plainResolved.leaf.content}</p>
+                    <LinkedPostText
+                      text={plainResolved.leaf.content}
+                      className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                    />
                   ) : null}
                   <PostMediaGallery
                     supabase={supabase}
@@ -1111,9 +1124,10 @@ export default function PostCard({
                   {plainResolved.node.reblog_commentary?.trim() &&
                   !(ungatedCommentary && plainResolved.node.reblog_commentary.trim() === ungatedCommentary) ? (
                     <div className={COMMENTARY_ADDED_LAYER_CLASS}>
-                      <p className="whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-text">
-                        {plainResolved.node.reblog_commentary.trim()}
-                      </p>
+                      <LinkedPostText
+                        text={plainResolved.node.reblog_commentary.trim()}
+                        className="text-[0.9375rem] leading-relaxed text-text"
+                      />
                     </div>
                   ) : null}
                   {plainResolved.node.quoted_post ? (
@@ -1130,7 +1144,10 @@ export default function PostCard({
               {showFlatReblogFallback ? (
                 <>
                   {fallbackBody.content ? (
-                    <p className="mb-1.5 mt-2.5 whitespace-pre-wrap text-base leading-relaxed text-text">{fallbackBody.content}</p>
+                    <LinkedPostText
+                      text={fallbackBody.content}
+                      className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                    />
                   ) : null}
                   <PostMediaGallery
                     supabase={supabase}
@@ -1169,9 +1186,10 @@ export default function PostCard({
                           </div>
                           {commentary && !ungatedCommentary ? (
                             <div className={QUOTE_REBLOG_LATEST_COMMENTARY_STRIP_CLASS}>
-                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-text max-md:text-[0.8125rem] max-md:leading-snug">
-                                {commentary}
-                              </p>
+                              <LinkedPostText
+                                text={commentary}
+                                className="text-sm leading-relaxed text-text max-md:text-[0.8125rem] max-md:leading-snug"
+                              />
                             </div>
                           ) : null}
                           {quoteOuterMedia && quoteOuterMedia.length > 0 ? (

@@ -29,6 +29,9 @@ export async function fetchTrendingTags(): Promise<{
 }> {
   const supabase = createServiceRoleServerClient();
   if (!supabase) {
+    console.warn(
+      "[fetchTrendingTags] service role client is missing (NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY unset/empty)",
+    );
     return { data: null, error: { message: "Service role not configured." } };
   }
 
@@ -39,10 +42,16 @@ export async function fetchTrendingTags(): Promise<{
   });
 
   if (error) {
+    console.error("[fetchTrendingTags] admin_top_tag_engagement RPC error:", {
+      message: error.message,
+      code: error.code,
+      details: error.details,
+    });
     return { data: null, error: { message: error.message } };
   }
 
   const rows = (data ?? []) as Record<string, unknown>[];
+  console.log("[fetchTrendingTags] admin_top_tag_engagement row count:", rows.length);
   const mapped: TrendingTag[] = rows.map((r) => ({
     tag: typeof r.tag === "string" ? r.tag : String(r.tag ?? ""),
     engagement_score: num(r.engagement_score),

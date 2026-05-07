@@ -57,7 +57,7 @@ function isMissingNoteAnchorColumnError(err: { code?: string; message?: string }
 
 /** Compact follow control; primary for Follow, muted border for Following (matches profile intent, smaller). */
 const FOLLOW_BTN_BASE =
-  "shrink-0 rounded-md px-2 py-0.5 text-meta font-medium transition-[opacity,colors,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-45";
+  "self-start mt-0.5 inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-md px-2 py-px text-meta font-medium leading-tight transition-[opacity,colors,box-shadow] duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-45";
 
 type Props = {
   open: boolean;
@@ -653,6 +653,11 @@ export default function PostNotesModal({
                         >
                           {rowKindLabel(note.kind)}
                         </span>
+                        {note.kind === "comment" ? (
+                          <span className="text-meta text-text-muted" aria-hidden="true">
+                            ·
+                          </span>
+                        ) : null}
                         <p className="min-w-0 text-sm leading-snug text-text">
                           <ProfileUsernameLink
                             usernameRaw={note.username}
@@ -660,16 +665,27 @@ export default function PostNotesModal({
                           >
                             {nameLabel}
                           </ProfileUsernameLink>{" "}
-                          <span className="font-normal text-text-secondary">{noteActionPhrase(note)}</span>
+                          {note.kind === "comment" ? (
+                            <>
+                              <span className="font-normal text-text-secondary">said</span>
+                              {note.body ? (
+                                <>
+                                  {" "}
+                                  <span className="whitespace-pre-wrap font-normal text-text">
+                                    {note.body}
+                                  </span>
+                                </>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span className="font-normal text-text-secondary">{noteActionPhrase(note)}</span>
+                          )}
                         </p>
                       </div>
                       {note.kind === "reblog" && note.commentary_preview ? (
                         <p className="mt-1.5 border-l-2 border-border/70 pl-2 text-sm leading-snug text-text-secondary">
                           {note.commentary_preview}
                         </p>
-                      ) : null}
-                      {note.kind === "comment" && note.body ? (
-                        <p className="mt-1.5 whitespace-pre-wrap text-sm leading-snug text-text">{note.body}</p>
                       ) : null}
                       <time
                         dateTime={note.acted_at}
@@ -687,7 +703,7 @@ export default function PostNotesModal({
                         className={
                           isFollowing
                             ? `${FOLLOW_BTN_BASE} border border-border/80 bg-bg-secondary/60 text-text-secondary hover:border-border hover:bg-bg-secondary hover:text-text`
-                            : `${FOLLOW_BTN_BASE} qrtz-btn-primary`
+                            : `${FOLLOW_BTN_BASE} !font-medium qrtz-btn-primary`
                         }
                         aria-busy={followBusy}
                         aria-label={isFollowing ? `Unfollow ${nameLabel}` : `Follow ${nameLabel}`}
@@ -732,7 +748,7 @@ export default function PostNotesModal({
                     setComposerText(e.target.value);
                     if (composerError) setComposerError(null);
                   }}
-                  placeholder="Say something quick — this is not threaded comments."
+                  placeholder="Add a quick comment to this post"
                   className="qrtz-field mb-2 w-full resize-none py-2 text-sm leading-snug"
                 />
                 <div className="mb-2 flex items-center justify-between gap-2 text-meta text-text-muted">

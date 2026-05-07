@@ -9,6 +9,7 @@ import {
   quotedNodeProfile,
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
+import LinkedPostText from "./LinkedPostText";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 import { QuoteLayerInlineTime } from "./QuoteLayerInlineTime";
 import PostMediaGallery from "./PostMediaGallery";
@@ -26,7 +27,10 @@ function QuotedFallbackBody({
         Earlier posts in this chain could not be loaded.
       </p>
       {node.content ? (
-        <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">{node.content}</p>
+        <LinkedPostText
+          text={node.content}
+          className="mt-1.5 text-sm leading-relaxed text-text-secondary"
+        />
       ) : null}
       <PostMediaGallery supabase={supabase} post={node} variant="quoted" wrapperClassName="mt-1.5" />
     </>
@@ -77,9 +81,10 @@ function QuotedChainLayer({
           {isLeaf ? (
             <>
               {node.content ? (
-                <p className="mt-1.5 whitespace-pre-wrap text-base leading-relaxed text-text max-md:text-[0.9375rem] max-md:leading-relaxed">
-                  {node.content}
-                </p>
+                <LinkedPostText
+                  text={node.content}
+                  className="mt-1.5 text-base leading-relaxed text-text max-md:text-[0.9375rem] max-md:leading-relaxed"
+                />
               ) : null}
               <PostMediaGallery
                 supabase={supabase}
@@ -92,9 +97,10 @@ function QuotedChainLayer({
             <>
               {node.reblog_commentary?.trim() ? (
                 <div className="mt-1.5 rounded-md border-l-2 border-electric-purple/35 bg-surface-blue/45 py-1.5 pl-2 pr-2 max-md:py-1.5 max-md:pl-2">
-                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-text max-md:text-[0.8125rem] max-md:leading-snug">
-                    {node.reblog_commentary.trim()}
-                  </p>
+                  <LinkedPostText
+                    text={node.reblog_commentary.trim()}
+                    className="text-sm leading-relaxed text-text max-md:text-[0.8125rem] max-md:leading-snug"
+                  />
                 </div>
               ) : null}
               {!node.quoted_post ? <QuotedFallbackBody node={node} supabase={supabase} /> : null}
