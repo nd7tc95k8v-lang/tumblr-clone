@@ -7,11 +7,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
-  fetchFollowedTagStringsForUser,
-  followNormalizedTagForUser,
-  unfollowNormalizedTagForUser,
-} from "@/lib/supabase/followed-tags";
-import {
   DEFAULT_NSFW_FEED_MODE,
   excludeNsfwPostsFromFeedQuery,
   resolveNsfwFeedModeFromProfileRow,
@@ -36,9 +31,6 @@ type Props = {
 /** Match PostCard tag chips: small bordered pills, not loud CTAs. */
 const RELATED_TAG_LINK_CLASS =
   "inline-block max-w-[min(100%,12rem)] truncate rounded-full border border-border bg-bg-secondary px-2 py-0.5 text-meta font-medium text-text-secondary transition-colors hover:border-accent-purple/45 hover:text-link focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0";
-
-const RELATED_FOLLOW_BTN_CLASS =
-  "inline-flex shrink-0 items-center justify-center rounded-full border border-border/80 bg-bg-secondary/40 px-2 py-0.5 text-meta font-medium text-text-secondary transition-colors hover:border-accent-purple/45 hover:bg-bg-secondary hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-55";
 
 function uniqueSortedTagsFromPosts(posts: FeedPost[]): string[] {
   const seen = new Set<string>();
@@ -83,13 +75,6 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
   const [sessionChecked, setSessionChecked] = useState(false);
   /** False only while a signed-in viewer’s `nsfw_feed_mode` row is being read. */
   const [signedInFeedPrefsReady, setSignedInFeedPrefsReady] = useState(true);
-
-  /** Normalized tag strings from `followed_tags`; empty when signed out. */
-  const [followedNormSet, setFollowedNormSet] = useState<Set<string>>(() => new Set());
-  const [followedTagsLoading, setFollowedTagsLoading] = useState(false);
-  /** Normalized tags with an in-flight follow/unfollow mutation (re-render + disabled UI). */
-  const [followMutationPending, setFollowMutationPending] = useState<Set<string>>(() => new Set());
-  const followMutationPendingRef = useRef<Set<string>>(new Set());
 
   const [textQ, setTextQ] = useState(qFromUrl);
   const [tagDraft, setTagDraft] = useState("");
@@ -167,68 +152,6 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       subscription.unsubscribe();
     };
   }, [supabase]);
-
-  useEffect(() => {
-    if (!supabase || !user?.id) {
-      setFollowedNormSet(new Set());
-      setFollowedTagsLoading(false);
-      return;
-    }
-    let cancelled = false;
-    setFollowedTagsLoading(true);
-    void (async () => {
-      const { tags, error: loadErr } = await fetchFollowedTagStringsForUser(supabase, user.id);
-      if (cancelled) return;
-      setFollowedTagsLoading(false);
-      if (loadErr) {
-        console.error(loadErr);
-        setFollowedNormSet(new Set());
-        return;
-      }
-      setFollowedNormSet(new Set(tags));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, user?.id]);
-
-  const handleRelatedTagFollowToggle = useCallback(
-    async (normalizedTag: string, isFollowing: boolean) => {
-      if (!supabase || !user?.id || !normalizedTag.length) return;
-      if (followMutationPendingRef.current.has(normalizedTag)) return;
-      followMutationPendingRef.current.add(normalizedTag);
-      setFollowMutationPending((prev) => new Set(prev).add(normalizedTag));
-      try {
-        if (isFollowing) {
-          const { error: unfollowErr } = await unfollowNormalizedTagForUser(supabase, user.id, normalizedTag);
-          if (unfollowErr) {
-            console.error(unfollowErr);
-            return;
-          }
-          setFollowedNormSet((prev) => {
-            const next = new Set(prev);
-            next.delete(normalizedTag);
-            return next;
-          });
-        } else {
-          const { error: followErr } = await followNormalizedTagForUser(supabase, user.id, normalizedTag);
-          if (followErr) {
-            console.error(followErr);
-            return;
-          }
-          setFollowedNormSet((prev) => new Set(prev).add(normalizedTag));
-        }
-      } finally {
-        followMutationPendingRef.current.delete(normalizedTag);
-        setFollowMutationPending((prev) => {
-          const next = new Set(prev);
-          next.delete(normalizedTag);
-          return next;
-        });
-      }
-    },
-    [supabase, user?.id],
-  );
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
@@ -317,15 +240,6 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     const selected = new Set(tagsListFromUrl);
     return inResults.filter((t) => !selected.has(t)).slice(0, 24);
   }, [hasQuery, posts, tagsListFromUrl]);
-
-  const relatedTagRows = useMemo(
-    () =>
-      relatedTags.map((displayTag) => ({
-        displayTag,
-        normalized: normalizeTagSegment(displayTag),
-      })),
-    [relatedTags],
-  );
 
   const handleReblog = useCallback(
     async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
@@ -457,53 +371,18 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
         <div className="w-full max-w-3xl">
           <p className="mb-2 text-meta font-medium text-text-secondary">Tags in these results</p>
           <ul className="flex list-none flex-wrap gap-x-2 gap-y-2 p-0">
-            {relatedTagRows.map(({ displayTag, normalized }) => {
+            {relatedTags.map((displayTag) => {
+              const normalized = normalizeTagSegment(displayTag);
               const rowKey = normalized.length > 0 ? normalized : displayTag;
-              const isFollowing = normalized.length > 0 && followedNormSet.has(normalized);
-              const busy =
-                Boolean(user && (followedTagsLoading || followMutationPending.has(normalized)));
-              const followDisabled =
-                !user || !normalized.length || followedTagsLoading || followMutationPending.has(normalized);
-
               return (
-                <li key={rowKey} className="flex max-w-full min-w-0 items-center gap-1.5">
+                <li key={rowKey} className="max-w-full min-w-0">
                   <Link href={`/tag/${encodeURIComponent(displayTag)}`} className={RELATED_TAG_LINK_CLASS}>
                     #{displayTag}
                   </Link>
-                  {user ? (
-                    <button
-                      type="button"
-                      disabled={followDisabled}
-                      onClick={() => void handleRelatedTagFollowToggle(normalized, isFollowing)}
-                      className={RELATED_FOLLOW_BTN_CLASS}
-                      aria-busy={busy}
-                      aria-label={
-                        isFollowing ? `Stop following tag ${displayTag}` : `Follow tag ${displayTag}`
-                      }
-                    >
-                      {followedTagsLoading ? (
-                        "…"
-                      ) : followMutationPending.has(normalized) ? (
-                        "…"
-                      ) : isFollowing ? (
-                        "Following"
-                      ) : (
-                        "Follow"
-                      )}
-                    </button>
-                  ) : null}
                 </li>
               );
             })}
           </ul>
-          {!user ? (
-            <p className="mt-2 text-meta text-text-muted">
-              <Link href="/" className="text-link hover:text-link-hover hover:underline transition-colors">
-                Sign in
-              </Link>{" "}
-              to follow tags.
-            </p>
-          ) : null}
         </div>
       ) : null}
 

@@ -555,7 +555,10 @@ export default function PostCard({
   /** Originals + quote-layer rows only — not plain snapshot reblogs (text + photos). */
   const canEditPostText = !hasReblogParent || hasQuoteReblogLayer(post);
   const canEditPostMedia = canEditPostText;
-  const ownerMenuRef = useRef<HTMLDetailsElement>(null);
+  const [ownerMenuOpen, setOwnerMenuOpen] = useState(false);
+  const [ownerMenuPos, setOwnerMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const ownerMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const ownerMenuPopoverRef = useRef<HTMLDivElement>(null);
   const mediaBaselinePathsRef = useRef<string[]>([]);
   const mediaInitialRowIdsRef = useRef<Set<string>>(new Set());
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
@@ -568,6 +571,62 @@ export default function PostCard({
       mountedRef.current = false;
     };
   }, []);
+
+  const closeOwnerMenu = useCallback(() => {
+    setOwnerMenuOpen(false);
+    setOwnerMenuPos(null);
+  }, []);
+
+  const updateOwnerMenuPosition = useCallback(() => {
+    const btn = ownerMenuButtonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    setOwnerMenuPos({ top: r.bottom + 4, left: r.right });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!ownerMenuOpen) {
+      setOwnerMenuPos(null);
+      return;
+    }
+    updateOwnerMenuPosition();
+    window.addEventListener("resize", updateOwnerMenuPosition);
+    window.addEventListener("scroll", updateOwnerMenuPosition, true);
+    return () => {
+      window.removeEventListener("resize", updateOwnerMenuPosition);
+      window.removeEventListener("scroll", updateOwnerMenuPosition, true);
+    };
+  }, [ownerMenuOpen, updateOwnerMenuPosition]);
+
+  useEffect(() => {
+    if (!ownerMenuOpen) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (ownerMenuButtonRef.current?.contains(t)) return;
+      if (ownerMenuPopoverRef.current?.contains(t)) return;
+      closeOwnerMenu();
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown, { passive: true });
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [ownerMenuOpen, closeOwnerMenu]);
+
+  useEffect(() => {
+    if (!ownerMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeOwnerMenu();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ownerMenuOpen, closeOwnerMenu]);
+
+  useEffect(() => {
+    closeOwnerMenu();
+  }, [post.id, closeOwnerMenu]);
 
   const closeSiblingOwnerModals = useCallback((keep: "tags" | "text" | "media") => {
     if (keep !== "tags") {
@@ -636,7 +695,7 @@ export default function PostCard({
       const { error: delPostErr } = await supabase.from("posts").delete().eq("id", postId);
       if (delPostErr) throw delPostErr;
 
-      ownerMenuRef.current?.removeAttribute("open");
+      if (mountedRef.current) closeOwnerMenu();
 
       if (removable.length > 0) {
         const { error: rmErr } = await supabase.storage.from("post-images").remove(removable);
@@ -651,17 +710,17 @@ export default function PostCard({
     } finally {
       if (mountedRef.current) setDeleteBusy(false);
     }
-  }, [post, supabase, onPostDeleted]);
+  }, [post, supabase, onPostDeleted, closeOwnerMenu]);
 
   const ownerActionBusy = deleteBusy || tagsEditBusy || textEditBusy || mediaEditBusy;
 
   const handleOpenEditTags = useCallback(() => {
     closeSiblingOwnerModals("tags");
-    ownerMenuRef.current?.removeAttribute("open");
+    closeOwnerMenu();
     setTagsDraft(coercePostTags(post.tags).join(", "));
     setTagsEditError(null);
     setTagsEditOpen(true);
-  }, [post.tags, closeSiblingOwnerModals]);
+  }, [post.tags, closeSiblingOwnerModals, closeOwnerMenu]);
 
   const handleSaveTags = useCallback(async () => {
     if (!supabase) {
@@ -687,13 +746,13 @@ export default function PostCard({
 
   const handleOpenEditText = useCallback(() => {
     closeSiblingOwnerModals("text");
-    ownerMenuRef.current?.removeAttribute("open");
+    closeOwnerMenu();
     setTextDraft(
       hasReblogParent ? (post.reblog_commentary ?? "") : post.content,
     );
     setTextEditError(null);
     setTextEditOpen(true);
-  }, [hasReblogParent, post.content, post.reblog_commentary, closeSiblingOwnerModals]);
+  }, [hasReblogParent, post.content, post.reblog_commentary, closeSiblingOwnerModals, closeOwnerMenu]);
 
   const handleSaveText = useCallback(async () => {
     if (!supabase) {
@@ -741,7 +800,7 @@ export default function PostCard({
   const handleOpenEditMedia = useCallback(() => {
     if (!supabase) return;
     closeSiblingOwnerModals("media");
-    ownerMenuRef.current?.removeAttribute("open");
+    closeOwnerMenu();
     const slots = buildMediaSlotsFromPost(post);
     setMediaSlots(slots);
     setMediaNewFiles([]);
@@ -751,7 +810,7 @@ export default function PostCard({
       slots.filter((s): s is Extract<MediaSlot, { kind: "row" }> => s.kind === "row").map((s) => s.rowId),
     );
     setMediaEditOpen(true);
-  }, [post, supabase, closeSiblingOwnerModals]);
+  }, [post, supabase, closeSiblingOwnerModals, closeOwnerMenu]);
 
   const addMediaFiles = useCallback(
     async (incoming: readonly File[]) => {
@@ -1343,16 +1402,21 @@ export default function PostCard({
 
               {isOwner ? (
                 <div className="ml-auto shrink-0">
-                  <details
-                    ref={ownerMenuRef}
-                    className={`group relative ${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}
-                  >
-                    <summary
-                      className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] list-none [&::-webkit-details-marker]:hidden ${
+                  <div className={`${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}>
+                    <button
+                      ref={ownerMenuButtonRef}
+                      type="button"
+                      className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] ${
                         ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
                       }`}
                       aria-label="Post options"
                       aria-busy={ownerActionBusy}
+                      aria-haspopup="menu"
+                      aria-expanded={ownerMenuOpen}
+                      onClick={() => {
+                        if (ownerActionBusy) return;
+                        setOwnerMenuOpen((v) => !v);
+                      }}
                     >
                       <span
                         aria-hidden
@@ -1360,14 +1424,20 @@ export default function PostCard({
                       >
                         ⋯
                       </span>
-                    </summary>
+                    </button>
+                  </div>
+                  {ownerMenuOpen && ownerMenuPos ? (
                     <div
-                      className="absolute right-0 top-full z-10 mt-1 min-w-[9.5rem] rounded-md border border-border/60 bg-bg-secondary py-1 shadow-md"
+                      ref={ownerMenuPopoverRef}
+                      role="menu"
+                      className="fixed z-10 min-w-[9.5rem] -translate-x-full rounded-md border border-border/60 bg-bg-secondary py-1 shadow-md"
+                      style={{ top: ownerMenuPos.top, left: ownerMenuPos.left }}
                       onClick={(e) => e.stopPropagation()}
                       onKeyDown={(e) => e.stopPropagation()}
                     >
                       <button
                         type="button"
+                        role="menuitem"
                         disabled={ownerActionBusy || !supabase}
                         className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                         onClick={handleOpenEditTags}
@@ -1377,6 +1447,7 @@ export default function PostCard({
                       {canEditPostText ? (
                         <button
                           type="button"
+                          role="menuitem"
                           disabled={ownerActionBusy || !supabase}
                           className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                           onClick={handleOpenEditText}
@@ -1387,6 +1458,7 @@ export default function PostCard({
                       {canEditPostMedia ? (
                         <button
                           type="button"
+                          role="menuitem"
                           disabled={ownerActionBusy || !supabase}
                           className="w-full px-3 py-1.5 text-left text-sm font-medium text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                           onClick={handleOpenEditMedia}
@@ -1396,6 +1468,7 @@ export default function PostCard({
                       ) : null}
                       <button
                         type="button"
+                        role="menuitem"
                         disabled={ownerActionBusy || !supabase}
                         className="w-full px-3 py-1.5 text-left text-sm font-medium text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
                         onClick={() => void handleOwnerDelete()}
@@ -1403,7 +1476,7 @@ export default function PostCard({
                         {deleteBusy ? "Deleting…" : "Delete"}
                       </button>
                     </div>
-                  </details>
+                  ) : null}
                 </div>
               ) : null}
             </div>
