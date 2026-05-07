@@ -74,7 +74,17 @@ export type FeedQueryRow = Omit<FeedRow, "original_post_id" | "is_nsfw" | "post_
 /**
  * Shared merge/hydration path for feed-shaped post rows (chain roots, quotes, engagement).
  * Used by `fetchFeedPosts` and `fetchSearchPosts`.
- * Sets `FeedPost.card_engagement_owner_post_id` from `noteOwnerPostIdForCard` (reserved; not used by likes/Notes yet).
+ *
+ * ## Two ids on every `FeedPost` (intentionally different roles)
+ *
+ * - **`original_post_id`** here is normalized to the **thread-root / chain-structure** id (`threadRootPostId(r)`)
+ *   before quote chain + `original_post` embed resolution. It answers “which chain does this row belong to?”
+ * - **`card_engagement_owner_post_id`** is set per row from **`noteOwnerPostIdForCard`** — the **authored-layer /
+ *   per-card engagement owner** for future Tumblr-style semantics. It can differ from `original_post_id` on
+ *   plain reblog rows (collapse to leaf identity) while **`attachFeedPostEngagement` still batches on thread root**
+ *   for shipped counts and `liked_by_me`.
+ *
+ * Do not conflate these fields: chain structure and future engagement identity diverge on purpose.
  */
 export async function hydrateFeedPostsFromQueryRows(
   supabase: SupabaseClient,
@@ -159,6 +169,7 @@ export async function hydrateFeedPostsFromQueryRows(
       reblog_count: 0,
       note_comment_count: 0,
       liked_by_me: false,
+      // Placeholder; authored-layer id filled immediately below (see module doc on dual identity).
       card_engagement_owner_post_id: "",
     };
     mergedRow.card_engagement_owner_post_id = noteOwnerPostIdForCard(mergedRow);

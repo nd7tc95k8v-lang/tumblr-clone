@@ -1,3 +1,26 @@
+/**
+ * Loads combined Notes (likes + reblogs + flat comment rows) for a post modal / diagnostics.
+ *
+ * ## Production semantics (unchanged contract)
+ *
+ * - **Likes:** always queried on the **thread root** (`threadRootPostId` argument) via
+ *   `post_likes_list_for_thread_root`; like-shaped notes stamp `post_id` / `root_post_id` as that root.
+ * - **Reblogs:** descendant rows where `posts.original_post_id` equals the normalized thread-root key; not anchor-scoped.
+ * - **Note comments:** default path reads `post_note_comments` filtered by **`thread_root_post_id`** only.
+ * - Totals helpers (`fetchPostNotesTotalCount`) follow the same root for like/reblog RPCs and thread-root comment counts.
+ *
+ * ## Prototype anchor comments (development only)
+ *
+ * When callers opt into `prototypeAnchorScopedComments` plus `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`
+ * **and** a non-empty `notesAnchorPostId`, **only the comment list / comment count paths** may call migration **035**
+ * anchor RPCs (`post_note_comments_list_for_anchor`, `post_note_comment_counts_by_anchor`).
+ * **Likes and reblogs stay thread-root.** This is intentionally narrow so production behavior cannot drift silently.
+ *
+ * ## Missing migration 035 RPCs
+ *
+ * If PostgREST reports the anchor RPC missing (`PGRST202` / “unknown function”), we **fall back** to the same
+ * thread-root comment SELECT / head count once per RPC name (dev `console.info`), preserving shipped behavior.
+ */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PostNote } from "@/types/post-note";
 
@@ -47,17 +70,13 @@ type CommentNoteRow = {
 };
 
 // ---------------------------------------------------------------------------
-// Notes query ownership (thread root vs prototype anchor comments)
+// Notes query routing (implementation detail; mirrors module doc)
 // ---------------------------------------------------------------------------
 //
-// **Shipped default:** likes + reblogs + comment list/count use the **thread root** (`threadRootPostId`).
-//
-// **Dev-only hybrid (opt-in):** `prototypeAnchorScopedComments` + `notesAnchorPostId` + env
-// `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1` — **comment list** uses `post_note_comments_list_for_anchor`;
-// **comment total** uses `post_note_comment_counts_by_anchor`. **Likes and reblogs stay thread-root.**
-// Missing anchor RPCs → safe fallback to thread-root comment queries (dev `console.info` once each).
+// Keep **likes + reblogs on thread root** in all environments. **Optional anchor scope applies only to
+// comment reads** when the dev prototype is enabled; otherwise every branch below uses `threadRootNotesKey`.
 
-/** Normalized thread-root id used for all current Notes fetches (unchanged contract). */
+/** Normalized thread-root id for like/reblog queries and the default comment path (shipped contract). */
 function notesThreadRootQueryKey(raw: string | undefined): string {
   return raw?.trim() ?? "";
 }
@@ -148,6 +167,11 @@ function mapAnchorListRpcRowsToCommentNoteRows(
   }));
 }
 
+/**
+ * Fetches flat comment rows for the Notes modal. **Default:** `post_note_comments` by `thread_root_post_id`.
+ * **Prototype:** tries `post_note_comments_list_for_anchor` when enabled; **on missing RPC** repeats the same
+ * thread-root query (logged once in development) — no empty list / error surface unless the anchor call fails for other reasons.
+ */
 async function fetchCommentRowsForNotesModal(
   supabase: SupabaseClient,
   params: FetchPostNotesParams,
@@ -411,6 +435,10 @@ export type FetchPostNotesTotalCountOptions = {
   notesAnchorPostId?: string | null;
 };
 
+/**
+ * Comment head-count for totals. Mirrors `fetchCommentRowsForNotesModal`: thread-root head count unless the
+ * dev prototype requests `post_note_comment_counts_by_anchor` and the RPC exists; otherwise falls back.
+ */
 async function resolveCommentCountForTotals(
   supabase: SupabaseClient,
   threadRootNotesKey: string,

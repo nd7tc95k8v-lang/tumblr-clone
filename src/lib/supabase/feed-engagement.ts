@@ -1,3 +1,24 @@
+/**
+ * Feed engagement batching + merge for `FeedPost` count fields (`like_count`, `reblog_count`,
+ * `note_comment_count`, `liked_by_me`).
+ *
+ * ## Thread identity vs engagement identity (intentionally separate)
+ *
+ * - **`original_post_id`** on `FeedPost` is **thread-root / chain-structure** identity (normalized in
+ *   {@link applyThreadRootOriginalPostId}). It describes where the reblog chain attaches, not necessarily
+ *   which post id should own Tumblr-style “this card” engagement.
+ * - **Shipped RPC batch keys** today follow **`engagementKeyForBatchAndMerge`**, which is implemented as
+ *   **`engagementKeyThreadRoot`** — i.e. production still aggregates likes/reblogs/note comments by **root**.
+ * - **`engagementKeyCardOwner`** exposes the **future** keyed id (`card_engagement_owner_post_id` / hydrate
+ *   ownership) **without using it for RPC batching yet**, so migrating to per-authored-layer engagement is
+ *   a deliberate switch + RPC work, not a silent change to chain fields.
+ *
+ * ## Future migration (no behavior change until then)
+ *
+ * Batch `post_like_counts`, `post_ids_liked_by_auth_user`, and related RPCs on per-card ids, then change
+ * `engagementKeyForBatchAndMerge` to delegate to `engagementKeyCardOwner` while keeping thread-root chain
+ * fields stable. **`engagementKeyForBatchAndMerge` must continue to resolve to thread root until that rollout.**
+ */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
@@ -15,36 +36,40 @@ function num(v: number | string | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
-// Engagement id sources (thread root vs per-card owner)
+// Engagement key helpers (thread root vs authored-layer owner)
 // ---------------------------------------------------------------------------
 //
-// Shipped behavior batches and merges on the **thread root** so `like_count`, `liked_by_me`,
-// `reblog_count`, and `note_comment_count` match `usePostLikeToggle` / `PostNotesModal` (thread scope).
-//
-// Future migration: batch `post_like_counts` / `post_ids_liked_by_auth_user` (and related RPCs) on
-// per-card ids, then change `engagementKeyForBatchAndMerge` to delegate to `engagementKeyCardOwner`.
-// Thread-root `original_post_id` stays under `applyThreadRootOriginalPostId` — engagement keys can
-// diverge without overloading chain-structure fields.
+// **Production today:** `engagementKeyForBatchAndMerge` → `engagementKeyThreadRoot` so counts and
+// `liked_by_me` stay aligned with `usePostLikeToggle`, `PostNotesModal`, and thread-root note comments.
 //
 // **Read-only card-owner like probe (unwired):** `fetchReadonlyPrototypeCardOwnerLikeProbe` in
-// `readonly-card-owner-like-prototype.ts` — same two RPCs, batched on `card_engagement_owner_post_id`
-// for diff vs thread-root maps; see IMPLEMENTATION.md for which totals cannot use existing RPCs.
+// `readonly-card-owner-like-prototype.ts` — same RPCs batched on `card_engagement_owner_post_id` for
+// diff vs thread-root maps; see IMPLEMENTATION.md for limits of existing RPCs.
 
-/** **Shipped:** chain root id — same as `threadRootPostId` / thread-level RPC semantics. */
+/**
+ * Id used for **thread-root** engagement in production: `threadRootPostId(post)` (chain root).
+ * Matches `original_post_id` after {@link applyThreadRootOriginalPostId}.
+ */
 function engagementKeyThreadRoot(p: FeedPost): string {
   return threadRootPostId(p);
 }
 
 /**
- * **Future target:** authored-layer / per-card id from hydrate (`noteOwnerPostIdForCard`).
- * Not used for RPC batching or merge yet.
+ * Id that **would** key per-authored-layer / per-card engagement after a future migration:
+ * `card_engagement_owner_post_id` (from `noteOwnerPostIdForCard` at hydrate).
+ * **Not** used for RPC batching, merge, or `liked_by_me` in the shipped code path.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- switch target for per-card engagement; see engagementKeyForBatchAndMerge
 function engagementKeyCardOwner(p: FeedPost): string {
   return p.card_engagement_owner_post_id;
 }
 
 /**
- * **Active batch + merge key** — today equals thread root. Single place to swap for per-card RPCs.
+ * **Production batch + merge key** for DISTINCT id lists and map lookups (`attachFeedPostEngagement`).
+ * **Contract (shipped):** must equal {@link engagementKeyThreadRoot}; **never** {@link engagementKeyCardOwner}
+ * until RPCs and product semantics move together.
+ *
+ * Changing this helper is the single switch point for Tumblr-style per-card engagement batching later.
  */
 function engagementKeyForBatchAndMerge(p: FeedPost): string {
   return engagementKeyThreadRoot(p);

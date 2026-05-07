@@ -276,6 +276,8 @@ function leafImagesFingerprintFromQuoted(node: QuotedPostNode | null): string {
 /**
  * True when this reblog row should show as a new quote layer (commentary and/or image differs from inherited thread media).
  * Plain reblogs (snapshot-only) return false.
+ *
+ * Drives both **UI tiering** and **`noteOwnerPostIdForCard`** (quote layers use the current row id as the authored layer).
  */
 export function hasQuoteReblogLayer(post: FeedPost): boolean {
   if (!post.reblog_of?.trim()) return false;
@@ -349,6 +351,10 @@ export type PlainReblogResolved =
 /**
  * For a plain reblog row, find how to collapse the parent chain for the card header and body.
  * Returns null if not a plain reblog or chain is missing.
+ *
+ * **`noteOwnerPostIdForCard`** reuses this collapse: `flat` → leaf id (stacked plain reblogs collapse to one authored
+ * surface); `quoted` → last plain hop before commentary. This is **display + future engagement identity only** —
+ * shipped likes/notes still resolve on the thread root in `feed-engagement` / Notes fetchers.
  */
 export function resolvePlainReblogDisplay(post: FeedPost): PlainReblogResolved | null {
   if (!post.reblog_of?.trim() || hasQuoteReblogLayer(post) || !post.quoted_post) return null;
@@ -396,17 +402,18 @@ export function postCardHeaderProfile(post: FeedPost): {
 }
 
 /**
- * Post id that “owns” this card’s authored layer for Tumblr-style per-reblog semantics (Notes,
- * engagement, etc.). Purely derived from the loaded {@link FeedPost}; mirrors the same collapse rules
- * as {@link postCardHeaderProfile} / {@link resolvePlainReblogDisplay}.
+ * **Preparatory helper:** post id that **would** “own” this card’s **authored layer** in a future Tumblr-style
+ * per-reblog engagement model (populate `FeedPost.card_engagement_owner_post_id` at hydrate).
  *
+ * Purely derived from the loaded row and quote tree; mirrors **`postCardHeaderProfile`** /
+ * **`resolvePlainReblogDisplay`** / **`hasQuoteReblogLayer`** so ownership matches what the user sees:
  * - Original (`reblog_of` empty) → `post.id`.
- * - Quote layer ({@link hasQuoteReblogLayer}: commentary and/or distinct outer media) → `post.id`.
- * - Plain reblog → {@link resolvePlainReblogDisplay}: `quoted` → that node’s id; `flat` → leaf id;
+ * - Quote layer (`hasQuoteReblogLayer`) → `post.id`.
+ * - Plain reblog → `resolvePlainReblogDisplay`: `quoted` → that node’s id; `flat` → leaf id;
  *   unresolved chain → `post.id`.
  *
- * @todo Wire here (likes, note comments, per-row counts) only after feed hydration and Notes modal
- *   agree on the same id — today likes stay thread-root for consistency.
+ * **Not wired** to shipped likes, note comment counts, Notes modal queries, or RPC batch keys — those remain
+ * thread-root until an explicit migration switches `engagementKeyForBatchAndMerge` and related product rules.
  */
 export function noteOwnerPostIdForCard(post: FeedPost): string {
   if (!post.reblog_of?.trim()) {

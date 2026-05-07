@@ -63,16 +63,25 @@ export type FeedPost = {
   /** Optional note from the reblogger; only set when `reblog_of` is non-null. */
   reblog_commentary?: string | null;
   /**
-   * Thread root id for chain structure (`original_post_id` in DB sense; equals `id` for originals).
-   * Feed hydration normalizes this from the row — separately from which id keys engagement RPC maps
-   * (see `attachFeedPostEngagement` in `src/lib/supabase/feed-engagement.ts`).
+   * **Thread-root identity only** — the reblog-chain / thread-structure root (`posts.original_post_id` in the
+   * DB sense; equals `id` for originals). Used for merged `original_post`, quote ancestry, and any query
+   * keyed by chain root.
+   *
+   * This field is **not** the authored-layer engagement id; do not overload it for per-card likes/notes.
+   * Hydration normalizes it via `threadRootPostId`. Which id batches engagement RPCs is separate —
+   * see `attachFeedPostEngagement` / `engagementKeyForBatchAndMerge` in
+   * `src/lib/supabase/feed-engagement.ts` (currently also thread-root for shipped behavior).
    */
   original_post_id: string;
   /**
-   * Authored-layer / per-card id for **future** engagement (likes, notes, counts) when semantics align
-   * with Tumblr-style per-reblog ownership. Populated at hydrate from `noteOwnerPostIdForCard` in
-   * `src/lib/feed-post-display.ts` — not the same as `original_post_id` (thread root). Shipped likes/Notes
-   * still use thread root.
+   * **Authored-layer / per-card id** reserved for **future** Tumblr-style per-reblog (per-visible-card)
+   * engagement: the post id that would own likes, note comments, and counts for this card when/if
+   * product semantics match that model. Populated at hydrate from `noteOwnerPostIdForCard` in
+   * `src/lib/feed-post-display.ts`.
+   *
+   * **Important:** intentionally **not** the same as `original_post_id` (thread root).
+   * **Current shipped behavior:** likes, notes modals, and feed counts still key off the **thread root**;
+   * this field is carried forward so a later RPC/DB migration can switch batching without renaming types.
    */
   card_engagement_owner_post_id: string;
   /** Mature content flag; enforced and inherited in DB (immutable once true). */
@@ -83,12 +92,16 @@ export type FeedPost = {
   like_count: number;
   /** Descendant reblogs for the chain root (`original_post_id`). */
   reblog_count: number;
-  /** Flat note comments on the thread root (`post_note_comments`). */
+  /**
+   * Count of flat **thread-root** note comments (`post_note_comments` where `thread_root_post_id` is the
+   * chain root). Same value for every row in the thread under shipped hydration; authoritative for UI.
+   */
   note_comment_count: number;
   /**
-   * Anchor-scoped flat note comment count (`note_anchor_post_id` / `post_note_comment_counts_by_anchor`).
-   * **Diagnostic / preparatory:** set only in development when the anchor RPC succeeds; omitted in production
-   * and when the probe is unsupported. **Not** used by shipped UI; `note_comment_count` stays thread-root.
+   * **Dev-only / preparatory / prototype:** anchor-scoped flat note comment total when migration **035**
+   * anchor RPCs are available (`note_anchor_post_id` / `post_note_comment_counts_by_anchor`), attached in
+   * development via the read-only probe in `feed-engagement`. Omitted when unsupported or outside dev.
+   * **Not** used by shipped production UI — `note_comment_count` remains thread-root.
    */
   anchor_note_comment_count?: number | null;
   /** True when the viewer liked the thread root (`post_ids_liked_by_auth_user` on root ids). */
