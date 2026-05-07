@@ -6,6 +6,7 @@ import type { QuotedPostNode } from "@/types/post";
 import {
   flattenVisibleQuotedChain,
   QUOTE_NEST_MAX_INITIAL_DEPTH,
+  quotedNestLayerOuterMedia,
   quotedNodeProfile,
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
@@ -42,7 +43,7 @@ type Props = {
   supabase: SupabaseClient | null;
   /**
    * Max quote layers to show before “Show full chain” (default 3).
-   * Oldest layers are shown first; newer tail is hidden while collapsed.
+   * Newest layers are shown first; older tail is hidden while collapsed.
    */
   maxVisibleDepth?: number;
   chainExpanded?: boolean;
@@ -50,7 +51,7 @@ type Props = {
 };
 
 /**
- * One horizontal layer in a flattened quote chain (oldest → newest): author row + body or commentary.
+ * One horizontal layer in a flattened quote chain (newest → oldest): author row + body or commentary.
  * No recursive inset — stacks vertically instead of nesting boxes.
  */
 function QuotedChainLayer({
@@ -64,6 +65,8 @@ function QuotedChainLayer({
 }) {
   const isLeaf = !node.reblog_of?.trim();
   const { primary, primaryRaw, primaryAvatarUrl } = quotedNodeProfile(node);
+  const nestOuterMedia =
+    !isLeaf && node.quoted_post ? quotedNestLayerOuterMedia(node) : null;
 
   return (
     <div className={isFirst ? "min-w-0" : "min-w-0 border-t border-border-soft/45 pt-2 max-md:pt-2.5"}>
@@ -103,6 +106,14 @@ function QuotedChainLayer({
                   />
                 </div>
               ) : null}
+              {nestOuterMedia && nestOuterMedia.length > 0 ? (
+                <PostMediaGallery
+                  supabase={supabase}
+                  normalizedImages={nestOuterMedia}
+                  variant="quoted"
+                  wrapperClassName="mt-1.5 max-md:mt-1.5"
+                />
+              ) : null}
               {!node.quoted_post ? <QuotedFallbackBody node={node} supabase={supabase} /> : null}
             </>
           )}
@@ -113,8 +124,8 @@ function QuotedChainLayer({
 }
 
 /**
- * Quote chain as a vertical stack (Twitter/Tumblr style): oldest/original at the top, each reblog
- * layer below — no recursive inset. Immediate parent of the feed row is the bottom layer in this list.
+ * Quote chain as a vertical stack: newest toward the immediate parent at the top, original/leaf at the bottom.
+ * No recursive inset. Collapsed depth shows the newest slice first.
  */
 export default function QuotedPostNest({
   node,

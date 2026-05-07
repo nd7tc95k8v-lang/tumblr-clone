@@ -1,4 +1,9 @@
-import { normalizePostImages, postImagesFingerprint, type NormalizedPostImage } from "@/lib/post-images";
+import {
+  devNormalizedImageStoragePathsForQuoteMediaDiag,
+  normalizePostImages,
+  postImagesFingerprint,
+  type NormalizedPostImage,
+} from "@/lib/post-images";
 import { usernameLooksLikeEmail } from "@/lib/username";
 import type { EmbeddedPostWithAuthor, FeedPost, QuotedPostNode } from "@/types/post";
 import { unwrapEmbed } from "@/types/post";
@@ -222,7 +227,7 @@ export function quotedChainLeaf(node: QuotedPostNode | null): QuotedPostNode | n
 }
 
 /**
- * Linear visible chain oldest → newest (original first, then each quote reblog layer toward `entry`).
+ * Linear visible chain **newest → oldest** (`entry` first — immediate parent of the feed row — down to the original).
  * Matches `QuotedPostNest` plain-intermediate skip rules (already-loaded tree only).
  */
 export function flattenVisibleQuotedChain(entry: QuotedPostNode | null): QuotedPostNode[] {
@@ -234,7 +239,7 @@ export function flattenVisibleQuotedChain(entry: QuotedPostNode | null): QuotedP
     n = n.quoted_post;
   }
   const visible: QuotedPostNode[] = [];
-  for (let i = path.length - 1; i >= 0; i -= 1) {
+  for (let i = 0; i < path.length; i += 1) {
     const node = path[i];
     const isLeaf = !node.reblog_of?.trim();
     if (isLeaf) {
@@ -326,6 +331,67 @@ function reblogAddonOwnImages(post: FeedPost): NormalizedPostImage[] {
 }
 
 /**
+ * Same path-prefix + leaf-dedupe rules as {@link reblogAddonOwnImages}, for a {@link QuotedPostNode} inside the nest.
+ */
+function quotedPostNodeAddonOwnImages(node: QuotedPostNode): NormalizedPostImage[] {
+  const uid = node.user_id?.trim();
+  if (!uid) return [];
+
+  const leaf = quotedChainLeaf(node.quoted_post);
+  const leafStorageLower = new Set(
+    (leaf ? normalizePostImages(leaf) : [])
+      .map((i) => (i.storagePath || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const out: NormalizedPostImage[] = [];
+  const seenLower = new Set<string>();
+
+  for (const img of normalizePostImages(node)) {
+    const sp = img.storagePath?.trim();
+    if (!sp || !storagePathOwnedByUser(sp, uid)) continue;
+    const sl = sp.toLowerCase();
+    if (leafStorageLower.has(sl)) continue;
+    if (seenLower.has(sl)) continue;
+    seenLower.add(sl);
+    out.push(img);
+  }
+
+  const leg = node.image_storage_path?.trim();
+  if (leg && storagePathOwnedByUser(leg, uid)) {
+    const ll = leg.toLowerCase();
+    if (!leafStorageLower.has(ll) && !seenLower.has(ll)) {
+      out.push({
+        alt: "Post image",
+        src: node.image_url?.trim() || null,
+        storagePath: leg,
+      });
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Distinct gallery for a **non-leaf** {@link QuotedPostNode} in `QuotedPostNest` — mirrors {@link quoteLayerOuterMedia}
+ * (author-owned add-on paths first, else full set when it differs from the quoted subtree leaf fingerprint).
+ * Returns `null` for originals / leaf nodes (`reblog_of` empty).
+ */
+export function quotedNestLayerOuterMedia(node: QuotedPostNode): NormalizedPostImage[] | null {
+  if (!node.reblog_of?.trim()) return null;
+
+  const addon = quotedPostNodeAddonOwnImages(node);
+  if (addon.length > 0) return addon;
+
+  const mine = normalizePostImages(node);
+  if (mine.length === 0) return null;
+  const inherited = leafImagesFingerprintFromQuoted(node.quoted_post);
+  const mineFp = postImagesFingerprint(node);
+  if (!inherited || mineFp !== inherited) return mine;
+  return null;
+}
+
+/**
  * True when this reblog row should show as a new quote layer (commentary and/or image differs from inherited thread media).
  * Plain reblogs (snapshot-only) return false.
  *
@@ -350,38 +416,74 @@ export function isPlainReblogRow(post: FeedPost): boolean {
   return Boolean(post.reblog_of?.trim()) && !hasQuoteReblogLayer(post);
 }
 
-/** Reblogger identity for the subtle “Reblogged by …” line; null when not a plain reblog row. */
-export function plainReblogAttributionProfile(post: FeedPost): {
+/** Display + link fields for a single @username line (header, via, source). */
+export type PostCardLineProfile = {
   primary: string;
   primaryRaw: string | null;
-} | null {
-  if (!isPlainReblogRow(post)) return null;
-  const raw = authorUsername(post)?.trim() || null;
-  return {
-    primary: displayUsername(raw),
-    primaryRaw: raw,
-  };
-}
+};
 
 /**
- * Immediate parent in a collapsed plain reblog chain (flat leaf), when their username differs from the leaf.
- * Uses only `post.quoted_post` / resolved leaf — no extra fetches.
+ * Card header attribution: current-row author, immediate parent (“via”), and optional chain root (“Source”).
+ * Uses `post.quoted_post` (immediate parent) and `post.original_post` (thread root); no extra queries.
  */
-export function plainReblogViaProfile(post: FeedPost): {
-  primary: string;
-  primaryRaw: string | null;
-} | null {
-  if (!isPlainReblogRow(post) || !post.quoted_post) return null;
-  const resolved = resolvePlainReblogDisplay(post);
-  if (!resolved || resolved.kind !== "flat") return null;
-  const first = post.quoted_post;
-  const leaf = resolved.leaf;
-  if (first.id === leaf.id) return null;
-  const fp = quotedNodeProfile(first);
-  const lp = quotedNodeProfile(leaf);
-  if (!fp.primaryRaw || !lp.primaryRaw) return null;
-  if (fp.primaryRaw.toLowerCase() === lp.primaryRaw.toLowerCase()) return null;
-  return fp;
+export type PostCardHeaderAttribution = PostCardLineProfile & {
+  primaryAvatarUrl: string | null;
+  /** Immediate parent author; omitted when missing or same as the row author. */
+  via: PostCardLineProfile | null;
+  /** Thread-root author when {@link PostCardHeaderAttribution.showSource}; otherwise null. */
+  source: PostCardLineProfile | null;
+  /** True when root author differs from the via author (deeper chains only). */
+  showSource: boolean;
+};
+
+export function postCardHeaderAttribution(post: FeedPost): PostCardHeaderAttribution {
+  const primaryRaw = authorUsername(post)?.trim() || null;
+  const primary = displayUsername(primaryRaw);
+  const primaryAvatarUrl = authorAvatarUrl(post);
+
+  if (!post.reblog_of?.trim()) {
+    return {
+      primary,
+      primaryRaw,
+      primaryAvatarUrl,
+      via: null,
+      source: null,
+      showSource: false,
+    };
+  }
+
+  let via: PostCardLineProfile | null = null;
+  if (post.quoted_post) {
+    const parent = quotedNodeProfile(post.quoted_post);
+    if (
+      parent.primaryRaw &&
+      (!primaryRaw || parent.primaryRaw.toLowerCase() !== primaryRaw.toLowerCase())
+    ) {
+      via = { primary: parent.primary, primaryRaw: parent.primaryRaw };
+    }
+  }
+
+  const rootEmbed = post.original_post;
+  const rootRaw = rootEmbed ? embedAuthorUsername(rootEmbed)?.trim() || null : null;
+  const sourceLine: PostCardLineProfile | null =
+    rootRaw ? { primary: displayUsername(rootRaw), primaryRaw: rootRaw } : null;
+
+  const showSource = Boolean(
+    via &&
+    sourceLine &&
+    via.primaryRaw &&
+    sourceLine.primaryRaw &&
+    sourceLine.primaryRaw.toLowerCase() !== via.primaryRaw.toLowerCase(),
+  );
+
+  return {
+    primary,
+    primaryRaw,
+    primaryAvatarUrl,
+    via,
+    source: showSource ? sourceLine : null,
+    showSource,
+  };
 }
 
 /**
@@ -399,6 +501,38 @@ export function quoteLayerOuterMedia(post: FeedPost): NormalizedPostImage[] | nu
   const mineFp = postImagesFingerprint(post);
   if (!inherited || mineFp !== inherited) return mine;
   return null;
+}
+
+/**
+ * Temporary DEV-only: compact `console.debug` for quote-reblog row media after hydration.
+ * Remove when investigation is complete.
+ */
+export function debugLogQuoteReblogMediaHydration(post: FeedPost): void {
+  if (process.env.NODE_ENV !== "development") return;
+  if (!hasQuoteReblogLayer(post)) return;
+
+  const normalizedStoragePaths = devNormalizedImageStoragePathsForQuoteMediaDiag(post);
+  const uid = post.user_id?.trim() ?? "";
+  const uidPrefix = `${uid.toLowerCase()}/`;
+  const anyStoragePathStartsWithUserIdPrefix = normalizedStoragePaths.some((p) =>
+    p.toLowerCase().startsWith(uidPrefix),
+  );
+  const addon = reblogAddonOwnImages(post);
+  const reblogAddonPaths = addon.map((i) => (i.storagePath || "").trim()).filter(Boolean);
+  const mineFp = postImagesFingerprint(post);
+  const leafFp = leafImagesFingerprintFromQuoted(post.quoted_post);
+  const outer = quoteLayerOuterMedia(post);
+
+  console.debug("[quote-reblog-media]", {
+    postId: post.id,
+    userId: post.user_id,
+    normalizedStoragePaths,
+    reblogAddonOwnImages: reblogAddonPaths,
+    postImagesFingerprint: mineFp,
+    leafImagesFingerprintFromQuoted: leafFp,
+    quoteLayerOuterMediaIsNull: outer === null,
+    anyStoragePathStartsWithUserIdPrefix,
+  });
 }
 
 export type PlainReblogResolved =
@@ -425,36 +559,20 @@ export function resolvePlainReblogDisplay(post: FeedPost): PlainReblogResolved |
   return { kind: "quoted", node: n };
 }
 
-/** Avatar / name shown in the post card header (respects plain vs quote reblog rules). */
+/**
+ * Avatar / name shown in the post card header — always the **current feed row** author
+ * (reblogger on reblogs), including plain / quick reblogs (no longer collapsed to chain leaf).
+ */
 export function postCardHeaderProfile(post: FeedPost): {
   primary: string;
   primaryRaw: string | null;
   primaryAvatarUrl: string | null;
 } {
-  if (!post.reblog_of?.trim()) {
-    const raw = authorUsername(post)?.trim() || null;
-    return {
-      primary: displayUsername(raw),
-      primaryRaw: raw,
-      primaryAvatarUrl: authorAvatarUrl(post),
-    };
-  }
-  if (hasQuoteReblogLayer(post)) {
-    const raw = authorUsername(post)?.trim() || null;
-    return {
-      primary: displayUsername(raw),
-      primaryRaw: raw,
-      primaryAvatarUrl: authorAvatarUrl(post),
-    };
-  }
-  const resolved = resolvePlainReblogDisplay(post);
-  if (resolved?.kind === "flat") return quotedNodeProfile(resolved.leaf);
-  if (resolved?.kind === "quoted") return quotedNodeProfile(resolved.node);
-  const raw = authorUsername(post)?.trim() || null;
+  const a = postCardHeaderAttribution(post);
   return {
-    primary: displayUsername(raw),
-    primaryRaw: raw,
-    primaryAvatarUrl: authorAvatarUrl(post),
+    primary: a.primary,
+    primaryRaw: a.primaryRaw,
+    primaryAvatarUrl: a.primaryAvatarUrl,
   };
 }
 

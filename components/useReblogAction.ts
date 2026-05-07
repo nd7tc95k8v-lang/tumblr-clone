@@ -83,14 +83,48 @@ export function useReblogAction(
         if (attachImages.length > 0) {
           const uploadedPaths: string[] = [];
           try {
-            // `post_images_copy_for_reblog` copies the chain root gallery onto this row; drop those junction rows only
-            // so the feed shows root media in the quoted nest and only the reblogger's uploads on this layer.
-            const { error: delCopyErr } = await supabase.from("post_images").delete().eq("post_id", newPostId);
-            if (delCopyErr) {
-              console.error(delCopyErr);
-              const m =
-                delCopyErr.message?.trim() || delCopyErr.code || "Could not prepare image attachments.";
-              throw new Error(`Saving image records failed: ${m}`);
+            // `post_images_copy_for_reblog` copies the chain root gallery onto this row; those rows must be removed
+            // before inserting uploader-owned paths. Plain client DELETE can match 0 rows when `posts` SELECT RLS hides
+            // the author's own NSFW row from the EXISTS subcheck on `post_images_delete_own_post` — use RPC first
+            // (migration 038 `clear_post_images_for_reblog_attachment`), then fall back to client delete.
+            if (process.env.NODE_ENV === "development") {
+              const { data: beforeClear } = await supabase
+                .from("post_images")
+                .select("id,storage_path,position")
+                .eq("post_id", newPostId)
+                .order("position", { ascending: true });
+              console.debug("[reblog-attach] post_images before clear", { newPostId, rows: beforeClear });
+            }
+
+            const { data: rpcCleared, error: rpcErr } = await supabase.rpc("clear_post_images_for_reblog_attachment", {
+              p_post_id: newPostId,
+            });
+            if (rpcErr) {
+              if (process.env.NODE_ENV === "development") {
+                console.debug("[reblog-attach] RPC clear unavailable, using client delete", {
+                  newPostId,
+                  code: rpcErr.code,
+                  message: rpcErr.message,
+                });
+              }
+              const { error: delCopyErr } = await supabase.from("post_images").delete().eq("post_id", newPostId);
+              if (delCopyErr) {
+                console.error(delCopyErr);
+                const m =
+                  delCopyErr.message?.trim() || delCopyErr.code || "Could not prepare image attachments.";
+                throw new Error(`Saving image records failed: ${m}`);
+              }
+            } else if (process.env.NODE_ENV === "development") {
+              console.debug("[reblog-attach] post_images cleared via RPC", { newPostId, deletedRowCount: rpcCleared });
+            }
+
+            if (process.env.NODE_ENV === "development") {
+              const { data: afterClear } = await supabase
+                .from("post_images")
+                .select("id,storage_path,position")
+                .eq("post_id", newPostId)
+                .order("position", { ascending: true });
+              console.debug("[reblog-attach] post_images after clear", { newPostId, rows: afterClear });
             }
 
             for (const selectedFile of attachImages) {
@@ -133,6 +167,19 @@ export function useReblogAction(
               throw new Error(`Linking primary image failed: ${m}`);
             }
             attachedImageStoragePaths = uploadedPaths;
+
+            if (process.env.NODE_ENV === "development") {
+              const { data: afterInsert } = await supabase
+                .from("post_images")
+                .select("storage_path,position")
+                .eq("post_id", newPostId)
+                .order("position", { ascending: true });
+              console.debug("[reblog-attach] post_images after insert + posts.image_storage_path update", {
+                newPostId,
+                primaryPath: uploadedPaths[0] ?? null,
+                rows: afterInsert,
+              });
+            }
           } catch (err: unknown) {
             for (const p of uploadedPaths) {
               const { error: rmErr } = await supabase.storage.from("post-images").remove([p]);

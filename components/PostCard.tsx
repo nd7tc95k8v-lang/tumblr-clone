@@ -5,18 +5,17 @@ import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
 import { preparePostImageForUpload } from "@/lib/post-image-prep";
-import { coercePostImageRows } from "@/lib/post-images";
+import { coercePostImageRows, devNormalizedImageStoragePathsForQuoteMediaDiag } from "@/lib/post-images";
 import { postElementDomId, postPermalinkPath } from "@/lib/post-anchor";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
 import { coercePostTags, displayTagsForPost, parseCommaSeparatedTags } from "@/lib/tags";
 import {
   bodyFromPost,
+  debugLogQuoteReblogMediaHydration,
   formatRelativePostTime,
   hasQuoteReblogLayer,
-  plainReblogAttributionProfile,
-  plainReblogViaProfile,
-  postCardHeaderProfile,
+  postCardHeaderAttribution,
   QUOTE_NEST_MAX_INITIAL_DEPTH,
   quoteLayerOuterMedia,
   resolvePlainReblogDisplay,
@@ -156,8 +155,8 @@ const QUOTED_BLOCK_FRAME_CLASS =
   "mt-2 min-w-0 rounded-lg border border-border/50 bg-bg-secondary/60 p-2 shadow-sm ring-1 ring-black/[0.03] sm:p-2.5 dark:ring-white/[0.04]";
 
 /**
- * Quote reblog: one shell — quoted/original on top (primary), optional reblogger commentary/media
- * below as a continuation strip (secondary), not a separate card.
+ * Quote reblog: one shell — newest reblogger commentary/media on top, then quoted chain beneath
+ * (matches {@link resolvePlainReblogDisplay} `quoted` branch and Tumblr-style reading order).
  */
 const QUOTE_REBLOG_STACK_CLASS =
   "mt-2 min-w-0 overflow-hidden rounded-lg border border-border/50 bg-bg-secondary/60 shadow-sm ring-1 ring-black/[0.03] dark:ring-white/[0.04]";
@@ -165,11 +164,11 @@ const QUOTE_REBLOG_STACK_CLASS =
 const QUOTE_REBLOG_QUOTED_INNER_CLASS = "min-w-0 p-2 sm:p-2.5";
 
 /**
- * Attached add-on under the nest (newest layer): same shell as before, fill one step stronger than older
- * stack layers so the current reblogger reads as the active layer while staying in one card.
+ * Current-row quote layer (commentary and/or add-on media): rendered above the nested quote chain;
+ * `border-b` separates this strip from the quoted content below.
  */
 const QUOTE_REBLOG_ADDON_CLASS =
-  "min-w-0 border-t border-border-soft/50 bg-bg-secondary/35 px-2 py-2 sm:px-2.5 sm:py-2";
+  "min-w-0 border-b border-border-soft/50 bg-bg-secondary/35 px-2 py-2 sm:px-2.5 sm:py-2";
 
 /** Matches {@link QuotedPostNest} layer row — avatar + content column. */
 const QUOTE_REBLOG_LATEST_LAYER_ROW_CLASS = "flex gap-1.5 sm:gap-2";
@@ -507,8 +506,14 @@ export default function PostCard({
     setNsfwRevealed(false);
   }, [post.id, nsfwFeedMode]);
 
-  const header = postCardHeaderProfile(post);
-  const { primary, primaryRaw, primaryAvatarUrl } = header;
+  const {
+    primary,
+    primaryRaw,
+    primaryAvatarUrl,
+    via: headerVia,
+    source: headerSource,
+    showSource: headerShowSource,
+  } = postCardHeaderAttribution(post);
   const isReblog = Boolean(post.reblog_of?.trim());
   const quoteLayer = hasQuoteReblogLayer(post);
   const plainResolved = resolvePlainReblogDisplay(post);
@@ -543,9 +548,6 @@ export default function PostCard({
   const quoteOuterMedia = quoteLayerOuterMedia(post);
   const showNestedQuote = Boolean(quoteLayer && post.quoted_post);
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
-  const plainReblogBy = plainReblogAttributionProfile(post);
-  const plainReblogVia = plainReblogViaProfile(post);
-
   const effectiveNsfwFeedMode = nsfwFeedMode ?? DEFAULT_NSFW_FEED_MODE;
   const nsfwPresentationGate = post.is_nsfw === true && effectiveNsfwFeedMode === "warn";
   const ungatedCommentary = nsfwPresentationGate ? nsfwUngatedVisibleCommentary(post) : null;
@@ -1014,6 +1016,44 @@ export default function PostCard({
     onExpandChain: () => setQuoteChainExpanded(true),
   } as const;
 
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (!hasQuoteReblogLayer(post)) return;
+    debugLogQuoteReblogMediaHydration(post);
+  }, [post]);
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (!post.reblog_of?.trim()) return;
+
+    const normalizedPaths = devNormalizedImageStoragePathsForQuoteMediaDiag(post);
+    const uid = post.user_id?.trim() ?? "";
+    const uidPrefix = `${uid.toLowerCase()}/`;
+    const anyPathStartsWithUserIdPrefix = normalizedPaths.some((p) =>
+      p.toLowerCase().startsWith(uidPrefix),
+    );
+    const outer = quoteLayerOuterMedia(post);
+    const quoteLayerOuterMediaPathsOrNull =
+      outer === null ? null : outer.map((o) => (o.storagePath || o.src || "").trim()).filter(Boolean);
+    const plain = resolvePlainReblogDisplay(post);
+
+    console.debug("[reblog-row-media]", {
+      postId: post.id,
+      userId: post.user_id,
+      reblogOf: post.reblog_of,
+      originalPostId: post.original_post_id,
+      reblogCommentary: post.reblog_commentary,
+      hasQuoteReblogLayer: hasQuoteReblogLayer(post),
+      resolvePlainReblogDisplayKind: plain?.kind ?? null,
+      normalizedImageStoragePaths: normalizedPaths,
+      anyPathStartsWithUserIdPrefix,
+      quoteLayerOuterMediaPathsOrNull,
+      quotedPostId: post.quoted_post?.id,
+      quotedPostUserId: post.quoted_post?.user_id,
+      quotedPostReblogOf: post.quoted_post?.reblog_of,
+    });
+  }, [post]);
+
   const postTime = formatRelativePostTime(post.created_at);
   const effectiveNoteCommentCount = Math.max(0, post.note_comment_count + noteCommentAdjust);
   const handleThreadNoteCountDelta = useCallback((delta: number) => {
@@ -1027,37 +1067,37 @@ export default function PostCard({
       <div className="flex gap-2 sm:gap-3">
         <ProfileAvatar url={primaryAvatarUrl} label={primary} size="md" className="mt-px" />
         <div className="min-w-0 flex-1">
-          <p className="font-heading text-base font-semibold leading-snug max-md:leading-tight tracking-tight text-text">
-            <ProfileUsernameLink usernameRaw={primaryRaw} className="font-semibold text-inherit">
-              {primary}
-            </ProfileUsernameLink>
-          </p>
-          {plainReblogBy ? (
-            <p className="mt-0.5 max-md:mt-1 text-[0.8125rem] max-md:text-[0.75rem] leading-snug max-md:leading-normal text-text-secondary">
-              <span className="font-normal text-text-muted max-md:text-text-muted/90">Reblogged by </span>
-              <ProfileUsernameLink
-                usernameRaw={plainReblogBy.primaryRaw}
-                className="font-normal text-text-secondary hover:text-link"
-              >
-                @{plainReblogBy.primary}
-              </ProfileUsernameLink>
-            </p>
-          ) : null}
-          {plainReblogVia ? (
-            <p
-              className={`text-[0.8125rem] max-md:text-[0.75rem] leading-snug max-md:leading-normal text-text-secondary ${
-                plainReblogBy ? "mt-0.5 max-md:mt-0.5" : "mt-0.5 max-md:mt-1"
-              }`}
-            >
-              <span className="font-normal text-text-muted max-md:text-text-muted/90">via </span>
-              <ProfileUsernameLink
-                usernameRaw={plainReblogVia.primaryRaw}
-                className="font-normal text-text-secondary hover:text-link"
-              >
-                @{plainReblogVia.primary}
-              </ProfileUsernameLink>
-            </p>
-          ) : null}
+          <div className="flex min-w-0 items-start justify-between gap-x-2 gap-y-0">
+            <div className="min-w-0 flex-1">
+              <p className="font-heading text-base font-semibold leading-snug max-md:leading-tight tracking-tight text-text">
+                <ProfileUsernameLink usernameRaw={primaryRaw} className="font-semibold text-inherit">
+                  {primary}
+                </ProfileUsernameLink>
+              </p>
+              {headerVia ? (
+                <p className="mt-0.5 max-md:mt-1 text-[0.8125rem] max-md:text-[0.75rem] leading-snug max-md:leading-normal text-text-secondary">
+                  <span className="font-normal text-text-muted max-md:text-text-muted/90">via </span>
+                  <ProfileUsernameLink
+                    usernameRaw={headerVia.primaryRaw}
+                    className="font-normal text-text-secondary hover:text-link"
+                  >
+                    @{headerVia.primary}
+                  </ProfileUsernameLink>
+                </p>
+              ) : null}
+            </div>
+            {headerShowSource && headerSource ? (
+              <p className="mt-px max-w-[42%] shrink-0 truncate text-right text-[0.8125rem] max-md:max-w-[45%] max-md:text-[0.6875rem] leading-snug text-text-muted max-md:text-text-muted/95">
+                <span className="font-normal">Source: </span>
+                <ProfileUsernameLink
+                  usernameRaw={headerSource.primaryRaw}
+                  className="font-normal text-text-secondary hover:text-link"
+                >
+                  @{headerSource.primary}
+                </ProfileUsernameLink>
+              </p>
+            ) : null}
+          </div>
           {post.homeFollowingMatchedTag ? (
             <p className="mt-1.5 max-md:mt-2 text-meta max-md:text-[0.6875rem] max-md:leading-snug text-text-muted max-md:text-text-muted/95">
               From tag you follow:{" "}
@@ -1165,9 +1205,6 @@ export default function PostCard({
               ) : null}
               {showNestedQuote && post.quoted_post ? (
                 <div className={QUOTE_REBLOG_STACK_CLASS}>
-                  <div className={QUOTE_REBLOG_QUOTED_INNER_CLASS}>
-                    <QuotedPostNest node={post.quoted_post} supabase={supabase} {...quoteNestExpandProps} />
-                  </div>
                   {(commentary && !ungatedCommentary) || (quoteOuterMedia && quoteOuterMedia.length > 0) ? (
                     <div className={QUOTE_REBLOG_ADDON_CLASS}>
                       <div className={QUOTE_REBLOG_LATEST_LAYER_ROW_CLASS}>
@@ -1206,6 +1243,9 @@ export default function PostCard({
                       </div>
                     </div>
                   ) : null}
+                  <div className={QUOTE_REBLOG_QUOTED_INNER_CLASS}>
+                    <QuotedPostNest node={post.quoted_post} supabase={supabase} {...quoteNestExpandProps} />
+                  </div>
                 </div>
               ) : null}
             </>

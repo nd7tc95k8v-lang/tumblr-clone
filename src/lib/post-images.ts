@@ -59,6 +59,17 @@ export function postImagesFingerprint(post: PostWithImages): string {
 }
 
 /**
+ * Temporary: storage paths from {@link normalizePostImages} for quote-reblog hydration diagnostics only.
+ * (Reblog rows with attachments should eventually list `{author_id}/…` paths here once `post_images` is correct.)
+ * Remove when quote-layer media investigation is done.
+ */
+export function devNormalizedImageStoragePathsForQuoteMediaDiag(post: PostWithImages): string[] {
+  return normalizePostImages(post)
+    .map((i) => (i.storagePath || "").trim())
+    .filter(Boolean);
+}
+
+/**
  * Coerce Supabase/PostgREST `post_images` embed into sorted rows.
  * `parentPostId` supplies `post_id` when the embed omits the redundant FK (rows would otherwise be dropped).
  * A synthetic `id` is used when the row id is missing so gallery normalization still runs.

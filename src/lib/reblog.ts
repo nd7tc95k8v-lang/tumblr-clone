@@ -113,6 +113,8 @@ export function buildOptimisticReblogFeedPost(input: {
   /**
    * After a successful editor reblog image pipeline: storage paths under `post-images` for this new row.
    * When omitted, `post_images` mirrors the source row (wrong for attached uploads — see `quoteLayerOuterMedia`).
+   * Server-side: `post_images_copy_for_reblog` may copy the root gallery; the client clears it via
+   * `clear_post_images_for_reblog_attachment` (migration 038) before inserting uploader-owned rows in `useReblogAction`.
    */
   attachedImageStoragePaths?: string[] | null;
 }): FeedPost {
