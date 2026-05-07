@@ -8,6 +8,11 @@ import { fetchProfileFollowCounts } from "@/lib/supabase/follow-counts";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { QRTZ_POST_ELEMENT_ID_PREFIX } from "@/lib/post-anchor";
+import {
+  DEFAULT_NSFW_FEED_MODE,
+  resolveNsfwFeedModeFromProfileRow,
+  type NsfwFeedMode,
+} from "@/lib/nsfw-feed-preference";
 import { normalizeUsername } from "@/lib/username";
 import type { ProfileFollowStats } from "@/types/follows";
 import type { ProfilePublic } from "@/types/profile";
@@ -53,6 +58,7 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
   const [showReblogs, setShowReblogs] = useState(true);
   /** Signed-in viewer’s posting default — not `localProfile` when browsing someone else’s blog. */
   const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
+  const [viewerNsfwFeedMode, setViewerNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
 
   useEffect(() => {
     setLocalProfile(profile);
@@ -82,27 +88,30 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
   useEffect(() => {
     if (!supabase || !user) {
       setViewerDefaultPostsNsfw(false);
+      setViewerNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
       return;
     }
     if (user.id === localProfile.id) {
       setViewerDefaultPostsNsfw(Boolean(localProfile.default_posts_nsfw));
+      setViewerNsfwFeedMode(resolveNsfwFeedModeFromProfileRow(localProfile));
       return;
     }
     let cancelled = false;
     void supabase
       .from("profiles")
-      .select("default_posts_nsfw")
+      .select("default_posts_nsfw, nsfw_feed_mode")
       .eq("id", user.id)
       .maybeSingle()
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error) console.error(error);
         setViewerDefaultPostsNsfw(Boolean(data?.default_posts_nsfw));
+        setViewerNsfwFeedMode(resolveNsfwFeedModeFromProfileRow(data));
       });
     return () => {
       cancelled = true;
     };
-  }, [supabase, user, localProfile.id, localProfile.default_posts_nsfw]);
+  }, [supabase, user, localProfile.id, localProfile.default_posts_nsfw, localProfile.nsfw_feed_mode]);
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
@@ -350,6 +359,7 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               supabase={supabase}
               currentUserId={user?.id ?? null}
               viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
+              nsfwFeedMode={viewerNsfwFeedMode}
               onPostDeleted={loadPosts}
               onPostUpdated={loadPosts}
               onReblog={async (p, commentary, tags, editorMarksMature) => {
