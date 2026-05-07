@@ -16,6 +16,7 @@ type Props = {
     commentary?: string | null,
     tags?: string[],
     editorMarksMature?: boolean,
+    images?: File[],
   ) => boolean | Promise<boolean>;
   /** Default for “Mark this reblog as mature” when opening the modal (SFW sources only). */
   viewerDefaultPostsNsfw?: boolean;
@@ -139,10 +140,10 @@ const Feed: React.FC<Props> = ({
             supabase={supabase}
             currentUserId={currentUserId}
             searchHighlightTags={postSearchHighlightTags}
-            onReblog={async (p, commentary, tags, editorMarksMature) => {
+            onReblog={async (p, commentary, tags, editorMarksMature, images) => {
               setRebloggingId(p.id);
               try {
-                return await onReblog(p, commentary, tags, editorMarksMature);
+                return await onReblog(p, commentary, tags, editorMarksMature, images);
               } finally {
                 setRebloggingId(null);
               }

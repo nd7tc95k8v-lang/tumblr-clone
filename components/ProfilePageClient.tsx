@@ -362,10 +362,10 @@ export default function ProfilePageClient({ profile, initialPosts, initialFollow
               nsfwFeedMode={viewerNsfwFeedMode}
               onPostDeleted={loadPosts}
               onPostUpdated={loadPosts}
-              onReblog={async (p, commentary, tags, editorMarksMature) => {
+              onReblog={async (p, commentary, tags, editorMarksMature, images) => {
                 setRebloggingId(p.id);
                 try {
-                  return await handleReblog(p, commentary, tags, editorMarksMature);
+                  return await handleReblog(p, commentary, tags, editorMarksMature, images);
                 } finally {
                   setRebloggingId(null);
                 }

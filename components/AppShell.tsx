@@ -9,6 +9,7 @@ import { fetchNotificationUnreadCount } from "@/lib/supabase/notifications-inbox
 import { clearPostImageSignedUrlCache } from "@/lib/supabase/post-image-url-cache";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
+import AdultAccessExpiryNotice from "./AdultAccessExpiryNotice";
 import SidebarAccount from "./SidebarAccount";
 
 const SPLASH_SLOGANS = [
@@ -99,11 +100,15 @@ function MobileTabIcon({ label, active }: { label: string; active: boolean }) {
 function useSupabaseSidebarAuth(supabase: ReturnType<typeof createBrowserSupabaseClient>) {
   const [user, setUser] = useState<User | null>(null);
   const [username, setUsername] = useState<string | null>(null);
+  const [adultContentStatus, setAdultContentStatus] = useState<string | null>(null);
+  const [adultContentAccessExpiresAt, setAdultContentAccessExpiresAt] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!supabase) {
       setUser(null);
       setUsername(null);
+      setAdultContentStatus(null);
+      setAdultContentAccessExpiresAt(null);
       return;
     }
     const {
@@ -113,11 +118,20 @@ function useSupabaseSidebarAuth(supabase: ReturnType<typeof createBrowserSupabas
     setUser(u);
     if (!u) {
       setUsername(null);
+      setAdultContentStatus(null);
+      setAdultContentAccessExpiresAt(null);
       return;
     }
-    const { data } = await supabase.from("profiles").select("username").eq("id", u.id).maybeSingle();
+    const { data } = await supabase
+      .from("profiles")
+      .select("username, adult_content_status, adult_content_access_expires_at")
+      .eq("id", u.id)
+      .maybeSingle();
     const un = data?.username?.trim();
     setUsername(un && un.length > 0 ? un : null);
+    setAdultContentStatus(typeof data?.adult_content_status === "string" ? data.adult_content_status : null);
+    const exp = data?.adult_content_access_expires_at;
+    setAdultContentAccessExpiresAt(typeof exp === "string" && exp.trim().length > 0 ? exp : null);
   }, [supabase]);
 
   useEffect(() => {
@@ -140,13 +154,14 @@ function useSupabaseSidebarAuth(supabase: ReturnType<typeof createBrowserSupabas
   const profileHref =
     username !== null ? `/profile/${encodeURIComponent(normalizeUsername(username))}` : "/";
 
-  return { user, username, profileHref, refreshAuth: refresh };
+  return { user, username, profileHref, refreshAuth: refresh, adultContentStatus, adultContentAccessExpiresAt };
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
-  const { user, username, profileHref, refreshAuth } = useSupabaseSidebarAuth(supabase);
+  const { user, username, profileHref, refreshAuth, adultContentStatus, adultContentAccessExpiresAt } =
+    useSupabaseSidebarAuth(supabase);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
 
   const refreshNotificationsUnread = useCallback(async () => {
@@ -179,6 +194,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     if (pathname.startsWith("/notifications")) return;
     void refreshNotificationsUnread();
   }, [pathname, refreshNotificationsUnread]);
+
+  /** Re-fetch profile (incl. adult access expiry) after leaving Settings so shell notices stay accurate. */
+  const prevPathForProfileRef = useRef(pathname);
+  useEffect(() => {
+    const prev = prevPathForProfileRef.current;
+    prevPathForProfileRef.current = pathname;
+    if (prev === "/settings" && pathname !== "/settings" && user) {
+      void refreshAuth();
+    }
+  }, [pathname, user, refreshAuth]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -455,6 +480,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         </aside>
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto bg-bg pb-[calc(4.375rem+env(safe-area-inset-bottom,0px))] md:pb-0">
+          {supabase && user ? (
+            <AdultAccessExpiryNotice
+              userId={user.id}
+              adultContentStatus={adultContentStatus}
+              adultContentAccessExpiresAt={adultContentAccessExpiresAt}
+            />
+          ) : null}
           <div className="flex-1 min-h-0">{children}</div>
           <footer className="shrink-0 border-t border-border px-4 py-4 text-center text-meta text-text-muted">
             © 2026 {APP_NAME}

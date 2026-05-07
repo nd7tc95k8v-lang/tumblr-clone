@@ -23,11 +23,23 @@ export function normalizeSearchTagList(raw: string[]): string[] {
   return out;
 }
 
+/** How selected tags combine: overlap (any) vs superset (all). */
+export type SearchTagMatchMode = "any" | "all";
+
+/** URL `tagMode` / client string → mode; missing or invalid → `"any"`. */
+export function parseSearchTagMatchMode(value: string | null | undefined): SearchTagMatchMode {
+  const v = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (v === "all") return "all";
+  return "any";
+}
+
 export type FetchSearchPostsOptions = {
   /** Raw substring match on `posts.content` (case-insensitive). */
   contentSubstring?: string | null;
-  /** Stored normalized tags; posts matching **any** of these (array overlap) are included. */
+  /** Stored normalized tags; combined per {@link tagMatchMode} (default any = overlap). */
   tagsAny?: string[];
+  /** Default `any`: `tags && selected`; `all`: post tags must include every selected tag. */
+  tagMatchMode?: SearchTagMatchMode;
   viewerUserId?: string | null;
   /** When set, restrict hits to this author's posts (combined with text/tags filters when present). */
   authorUserId?: string | null;
@@ -36,7 +48,7 @@ export type FetchSearchPostsOptions = {
 };
 
 /**
- * Search posts by optional text (`ILIKE` on content) and/or tags (`tags && selected`).
+ * Search posts by optional text (`ILIKE` on content) and/or tags (overlap or contains).
  * When both are set, filters are combined with AND.
  * Reuses the same merge + engagement hydration as the main feed.
  */
@@ -46,6 +58,7 @@ export async function fetchSearchPosts(
 ): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
   const text = options.contentSubstring?.trim() ?? "";
   const tags = normalizeSearchTagList(options.tagsAny ?? []);
+  const tagMatchMode = options.tagMatchMode ?? "any";
 
   if (text.length === 0 && tags.length === 0) {
     return { data: [], error: null };
@@ -62,7 +75,8 @@ export async function fetchSearchPosts(
     query = query.ilike("content", `%${escapeIlikePattern(text)}%`);
   }
   if (tags.length > 0) {
-    query = query.overlaps("tags", tags);
+    query =
+      tagMatchMode === "all" ? query.contains("tags", tags) : query.overlaps("tags", tags);
   }
 
   if (options.excludeNsfwFromFeed) {
@@ -81,6 +95,7 @@ export type FetchSearchPostsWithTwoTokenFallbackOptions = {
   /** Raw URL `q` (trimmed by caller); used for {@link derivePostSearchText} and optional retry. */
   rawQ: string;
   tagsAny?: string[];
+  tagMatchMode?: SearchTagMatchMode;
   viewerUserId?: string | null;
   excludeNsfwFromFeed?: boolean;
 };
@@ -112,9 +127,11 @@ export async function fetchSearchPostsWithTwoTokenFallback(
   options: FetchSearchPostsWithTwoTokenFallbackOptions,
 ): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
   const postSearchText = derivePostSearchText(options.rawQ);
+  const tagMatchMode = options.tagMatchMode ?? "any";
   const firstOpts: FetchSearchPostsOptions = {
     contentSubstring: postSearchText.length > 0 ? postSearchText : null,
     tagsAny: options.tagsAny,
+    tagMatchMode,
     viewerUserId: options.viewerUserId ?? null,
     excludeNsfwFromFeed: options.excludeNsfwFromFeed,
   };
@@ -154,6 +171,7 @@ export async function fetchSearchPostsWithTwoTokenFallback(
       const scoped = await fetchSearchPosts(supabase, {
         contentSubstring: null,
         tagsAny: options.tagsAny,
+        tagMatchMode,
         viewerUserId: options.viewerUserId ?? null,
         authorUserId: resolved.id,
         excludeNsfwFromFeed: options.excludeNsfwFromFeed,

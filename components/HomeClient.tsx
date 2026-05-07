@@ -20,6 +20,7 @@ import { fetchFollowedTagStringsForUser } from "@/lib/supabase/followed-tags";
 import { profileNeedsOnboarding } from "@/lib/username";
 import type { FeedPost, PostAuthorEmbed } from "@/types/post";
 import AuthForm from "./AuthForm";
+import ContentSafetyOnboarding, { readContentSafetyOnboardingDismissed } from "./ContentSafetyOnboarding";
 import Feed from "./Feed";
 import UsernameOnboarding from "./UsernameOnboarding";
 import { useReblogAction } from "./useReblogAction";
@@ -31,6 +32,8 @@ type ProfileRow = {
   username: string | null;
   default_posts_nsfw?: boolean;
   nsfw_feed_mode?: string | null;
+  adult_content_status?: string | null;
+  adult_content_access_expires_at?: string | null;
 };
 
 function prependWithoutDuplicate(newPost: FeedPost, existing: FeedPost[]): FeedPost[] {
@@ -99,6 +102,8 @@ function ClientShell() {
   /** Count of accounts this user follows (excluding self). Used for empty-follow hint. */
   const [followingOthersCount, setFollowingOthersCount] = useState<number | null>(null);
   const [pendingNewPosts, setPendingNewPosts] = useState<FeedPost[]>([]);
+  /** Bumps after localStorage dismiss so `readContentSafetyOnboardingDismissed` is re-evaluated without navigation. */
+  const [contentSafetyDismissBump, setContentSafetyDismissBump] = useState(0);
 
   const postsRef = useRef<FeedPost[]>([]);
   postsRef.current = posts;
@@ -127,7 +132,7 @@ function ClientShell() {
     try {
       const { data: profileRow, error } = await supabase
         .from("profiles")
-        .select("id, username, default_posts_nsfw, nsfw_feed_mode")
+        .select("id, username, default_posts_nsfw, nsfw_feed_mode, adult_content_status, adult_content_access_expires_at")
         .eq("id", user.id)
         .maybeSingle();
       if (error) {
@@ -145,7 +150,14 @@ function ClientShell() {
           setProfileLoadFailed(true);
           return;
         }
-        data = { id: user.id, username: null, default_posts_nsfw: false, nsfw_feed_mode: "warn" };
+        data = {
+          id: user.id,
+          username: null,
+          default_posts_nsfw: false,
+          nsfw_feed_mode: "warn",
+          adult_content_status: null,
+          adult_content_access_expires_at: null,
+        };
       }
       setProfile(data);
     } finally {
@@ -321,7 +333,17 @@ function ClientShell() {
   }, [loadProfile]);
 
   const needsOnboarding = Boolean(user && profile && profileNeedsOnboarding(profile.username));
-  const showFeed = Boolean(user && profile && !profileNeedsOnboarding(profile.username));
+  const pastUsernameOnboarding = Boolean(user && profile && !profileNeedsOnboarding(profile.username));
+  const contentSafetyOnboardingComplete = useMemo(() => {
+    const adultAccessActive = Boolean(
+      profile?.adult_content_status === "granted" && profile?.adult_content_access_expires_at,
+    );
+    if (adultAccessActive) return true;
+    if (user?.id && readContentSafetyOnboardingDismissed(user.id)) return true;
+    return false;
+  }, [profile, user?.id, contentSafetyDismissBump]);
+  const showFeed = pastUsernameOnboarding && contentSafetyOnboardingComplete;
+  const showContentSafetyOnboarding = pastUsernameOnboarding && !contentSafetyOnboardingComplete;
   const homeFeedNsfwMode = profile ? resolveNsfwFeedModeFromProfileRow(profile) : DEFAULT_NSFW_FEED_MODE;
   const excludeNsfwFromHomeFeed =
     Boolean(user) && Boolean(profile) && excludeNsfwPostsFromFeedQuery(homeFeedNsfwMode);
@@ -456,6 +478,13 @@ function ClientShell() {
           userId={user.id}
           onComplete={loadProfile}
         />
+      ) : user && showContentSafetyOnboarding ? (
+        <div className="flex w-full flex-col items-center">
+          <ContentSafetyOnboarding
+            userId={user.id}
+            onKeepHidden={() => setContentSafetyDismissBump((n) => n + 1)}
+          />
+        </div>
       ) : user && showFeed ? (
         <>
           {followingOthersCount === 0 ? (

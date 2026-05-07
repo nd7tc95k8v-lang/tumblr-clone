@@ -130,10 +130,10 @@ export default function PostPermalinkClient({ postId, initialPost }: Props) {
           currentUserId={user?.id ?? null}
           hidePermalink
           viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
-          onReblog={async (p, commentary, tags, editorMarksMature) => {
+          onReblog={async (p, commentary, tags, editorMarksMature, images) => {
             setRebloggingId(p.id);
             try {
-              return await handleReblog(p, commentary, tags, editorMarksMature);
+              return await handleReblog(p, commentary, tags, editorMarksMature, images);
             } finally {
               setRebloggingId(null);
             }

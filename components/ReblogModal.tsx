@@ -1,16 +1,62 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { FeedPost } from "@/types/post";
+import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
+import { preparePostImageForUpload } from "@/lib/post-image-prep";
 import { bodyFromPost, quotedPostAuthorDisplay } from "@/lib/feed-post-display";
 import { parseCommaSeparatedTags } from "@/lib/tags";
 import { InlineErrorBanner } from "./InlineErrorBanner";
+
+const MAX_POST_IMAGES = 10;
+
+function PreviewThumb({
+  file,
+  onRemove,
+  removeDisabled,
+}: {
+  file: File;
+  onRemove: () => void;
+  removeDisabled?: boolean;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+
+  return (
+    <div className="relative aspect-square w-[4.5rem] shrink-0 overflow-hidden rounded-md border border-border/70 bg-bg-secondary ring-1 ring-black/[0.03] dark:ring-white/[0.04]">
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <div className="h-full w-full animate-pulse bg-bg-secondary" aria-hidden />
+      )}
+      <button
+        type="button"
+        disabled={removeDisabled}
+        onClick={onRemove}
+        onMouseDown={(e) => {
+          e.preventDefault();
+        }}
+        className="absolute right-0.5 top-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white transition-colors hover:bg-black/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-focus disabled:opacity-40"
+        aria-label="Remove image"
+      >
+        ×
+      </button>
+    </div>
+  );
+}
 
 export type ReblogModalConfirmPayload = {
   commentary: string;
   tags: string[];
   /** When the source post is SFW: user chose mature for this authored layer (checkbox). Omitted when parent is NSFW. */
   isNsfw?: boolean;
+  /** Prepared image files (see {@link preparePostImageForUpload}); optional. */
+  images: File[];
 };
 
 type Props = {
@@ -36,11 +82,50 @@ export default function ReblogModal({
   const [text, setText] = useState("");
   const [tagsRaw, setTagsRaw] = useState("");
   const [markMature, setMarkMature] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [dragActive, setDragActive] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const ACCEPT_IMAGE_ATTR = ALLOWED_IMAGE_MIME_TYPES.join(",");
+
+  const addValidatedFiles = useCallback(async (incoming: readonly File[]) => {
+    const batch = Array.from(incoming);
+    const accepted: File[] = [];
+    let firstError: string | null = null;
+    let room = Math.max(0, MAX_POST_IMAGES - selectedFiles.length);
+    for (const f of batch) {
+      if (room <= 0) break;
+      const prepared = await preparePostImageForUpload(f);
+      if (!prepared.ok) {
+        if (!firstError) firstError = prepared.error;
+        continue;
+      }
+      accepted.push(prepared.file);
+      room -= 1;
+    }
+    setSelectedFiles((prev) => {
+      const next = [...prev];
+      for (const file of accepted) {
+        if (next.length >= MAX_POST_IMAGES) break;
+        next.push(file);
+      }
+      return next;
+    });
+    queueMicrotask(() => {
+      if (firstError) setFilesError(firstError);
+      else setFilesError(null);
+    });
+  }, [selectedFiles.length]);
 
   useEffect(() => {
     if (post) {
       setText("");
       setTagsRaw("");
+      setSelectedFiles([]);
+      setFilesError(null);
+      setDragActive(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
       const sourceIsMature = post.is_nsfw === true;
       setMarkMature(!sourceIsMature && viewerDefaultPostsNsfw);
     }
@@ -67,6 +152,8 @@ export default function ReblogModal({
     if (errorMessage && onDismissError) onDismissError();
   };
 
+  const canAddCount = Math.max(0, MAX_POST_IMAGES - selectedFiles.length);
+
   return (
     <div
       className="qrtz-modal-overlay"
@@ -84,7 +171,7 @@ export default function ReblogModal({
           Reblog
         </h2>
         <p className="mb-2 text-meta leading-snug text-text-secondary">
-          Add optional commentary and tags — or reblog as-is.
+          Add optional commentary, tags, or photos — or reblog as-is.
         </p>
         <p className="mb-3 line-clamp-4 whitespace-pre-wrap text-meta text-text-muted">
           From <span className="font-medium text-text-secondary">{quotedAuthor}</span>: {preview}
@@ -96,8 +183,8 @@ export default function ReblogModal({
         ) : (
           <>
             <p className="mb-2 text-meta text-text-muted leading-snug">
-              From here, “Mark new posts mature by default” (Settings) applies to reblogs of safe posts unless you clear
-              the checkbox. Quick reblogs of safe posts don’t use that default.
+              “Mark new posts mature by default” (Settings) applies only when you create a new original post. Reblogs of
+              safe posts stay safe unless you mark them mature here; one-tap quick reblogs never use that setting.
             </p>
           <label className="mb-3 flex cursor-pointer items-start gap-2 text-meta text-text-secondary">
             <input
@@ -152,6 +239,96 @@ export default function ReblogModal({
             className="qrtz-field py-2 text-sm"
           />
         </div>
+        <div className="mb-3">
+          <p className="mb-1.5 text-meta font-medium text-text-secondary">
+            Photos <span className="font-normal text-text-muted">(optional, up to {MAX_POST_IMAGES})</span>
+          </p>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPT_IMAGE_ATTR}
+            multiple
+            className="sr-only"
+            aria-label="Add images to this reblog"
+            disabled={busy || canAddCount === 0}
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = "";
+              if (!files.length) return;
+              void addValidatedFiles(files.slice(0, Math.max(0, canAddCount)));
+            }}
+          />
+          <div
+            role="button"
+            tabIndex={0}
+            aria-label={`Add images to this reblog, up to ${MAX_POST_IMAGES} files`}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                if (!busy && canAddCount > 0) fileInputRef.current?.click();
+              }
+            }}
+            onDragEnter={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragActive(true);
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragActive(true);
+            }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragActive(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setDragActive(false);
+              if (busy || canAddCount === 0) return;
+              void addValidatedFiles(Array.from(e.dataTransfer.files ?? []).slice(0, canAddCount));
+            }}
+            onClick={() => {
+              if (busy || canAddCount === 0) return;
+              setFilesError(null);
+              fileInputRef.current?.click();
+            }}
+            className={`cursor-pointer rounded-lg border border-dashed px-3 py-2 text-center text-meta transition-colors ${
+              dragActive ? "border-accent-aqua/50 bg-surface-blue/35" : "border-border/55 bg-bg-secondary/30"
+            } ${busy || canAddCount === 0 ? "pointer-events-none opacity-50" : ""}`}
+          >
+            {canAddCount === 0 ? (
+              <span className="text-text-muted">Maximum {MAX_POST_IMAGES} images.</span>
+            ) : (
+              <span className="text-text-secondary">Drop images here or click to add</span>
+            )}
+          </div>
+          {selectedFiles.length > 0 ? (
+            <ul className="mt-2 flex list-none flex-wrap gap-1.5 p-0">
+              {selectedFiles.map((f, i) => (
+                <li key={`${f.name}-${i}-${f.size}`} className="contents">
+                  <PreviewThumb
+                    file={f}
+                    removeDisabled={busy}
+                    onRemove={() => {
+                      setSelectedFiles((prev) => prev.filter((_, j) => j !== i));
+                      setFilesError(null);
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {filesError?.trim() ? (
+            <InlineErrorBanner
+              message={filesError}
+              onDismiss={() => setFilesError(null)}
+              className="mt-2"
+            />
+          ) : null}
+        </div>
         {errorMessage?.trim() && onDismissError ? (
           <InlineErrorBanner message={errorMessage} onDismiss={onDismissError} className="mb-3" />
         ) : null}
@@ -171,6 +348,7 @@ export default function ReblogModal({
               void onConfirm({
                 commentary: text,
                 tags: parseCommaSeparatedTags(tagsRaw),
+                images: selectedFiles,
                 ...(sourceIsMature ? {} : { isNsfw: markMature }),
               })
             }

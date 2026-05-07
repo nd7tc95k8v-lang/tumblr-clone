@@ -62,14 +62,13 @@ export default function FollowedTagsSettings({ supabase, user }: Props) {
   );
 
   return (
-    <section className="qrtz-card md:col-span-2">
-      <h2 className="mb-1 text-meta font-semibold uppercase tracking-wide text-text-muted">Followed tags</h2>
-      <p className="mb-4 text-meta text-text-secondary">
+    <>
+      <p className="text-meta text-text-secondary">
         Tags you follow appear in your Home feed. You can follow more from tag pages or when browsing search.
       </p>
 
-      {loadError ? <p className="mb-3 text-meta text-error">{loadError}</p> : null}
-      {unfollowError ? <p className="mb-3 text-meta text-error">{unfollowError}</p> : null}
+      {loadError ? <p className="text-meta text-error">{loadError}</p> : null}
+      {unfollowError ? <p className="text-meta text-error">{unfollowError}</p> : null}
 
       {loading ? (
         <p className="text-sm text-text-muted">Loading…</p>
@@ -80,7 +79,7 @@ export default function FollowedTagsSettings({ supabase, user }: Props) {
         </p>
       ) : (
         <ul
-          className="flex max-h-[min(24rem,55vh)] flex-col gap-1.5 overflow-y-auto rounded-btn border border-border/80 bg-bg-secondary/40 py-2 pl-2 pr-1"
+          className="flex max-h-[min(24rem,55vh)] min-w-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden rounded-btn border border-border/80 bg-bg-secondary/40 py-2 pl-2 pr-1"
           aria-label="Followed tags"
         >
           {tags.map((tag) => {
@@ -109,6 +108,6 @@ export default function FollowedTagsSettings({ supabase, user }: Props) {
           })}
         </ul>
       )}
-    </section>
+    </>
   );
 }

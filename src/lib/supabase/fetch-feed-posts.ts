@@ -99,7 +99,7 @@ export async function hydrateFeedPostsFromQueryRows(
     ...r,
     original_post_id: threadRootPostId(r),
     is_nsfw: Boolean(r.is_nsfw),
-    post_images: coercePostImageRows(r.post_images),
+    post_images: coercePostImageRows(r.post_images, r.id),
   }));
   const feedById = new Map<string, FeedRow>(feedRows.map((r) => [r.id, r]));
 
@@ -152,7 +152,7 @@ export async function hydrateFeedPostsFromQueryRows(
       map.set(row.id, {
         ...row,
         tags: coercePostTags(row.tags),
-        post_images: coercePostImageRows(row.post_images),
+        post_images: coercePostImageRows(row.post_images, row.id),
       });
     }
   }

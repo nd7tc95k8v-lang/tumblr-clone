@@ -273,6 +273,58 @@ function leafImagesFingerprintFromQuoted(node: QuotedPostNode | null): string {
   return postImagesFingerprint(leaf);
 }
 
+/** `post-images` paths are `{auth.uid}/…`; compare prefixes case-insensitively (UUID text casing can differ). */
+function storagePathOwnedByUser(storagePath: string | null | undefined, userId: string): boolean {
+  const p = storagePath?.trim();
+  const u = userId.trim().toLowerCase();
+  if (!p || !u) return false;
+  return p.toLowerCase().startsWith(`${u}/`);
+}
+
+/**
+ * Images on this reblog row that belong in the **reblogger add-on** layer: storage paths under this row author’s
+ * prefix in bucket `post-images`, excluding paths that are already on the quoted chain **leaf** (dedupes copies).
+ */
+function reblogAddonOwnImages(post: FeedPost): NormalizedPostImage[] {
+  const uid = post.user_id?.trim();
+  if (!uid) return [];
+
+  const leaf = quotedChainLeaf(post.quoted_post);
+  const leafStorageLower = new Set(
+    (leaf ? normalizePostImages(leaf) : [])
+      .map((i) => (i.storagePath || "").trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+  const out: NormalizedPostImage[] = [];
+  const seenLower = new Set<string>();
+
+  for (const img of normalizePostImages(post)) {
+    const sp = img.storagePath?.trim();
+    if (!sp || !storagePathOwnedByUser(sp, uid)) continue;
+    const sl = sp.toLowerCase();
+    if (leafStorageLower.has(sl)) continue;
+    if (seenLower.has(sl)) continue;
+    seenLower.add(sl);
+    out.push(img);
+  }
+
+  /* When `post_images` rows failed coercion but `posts.image_storage_path` is set (hydration edge cases). */
+  const leg = post.image_storage_path?.trim();
+  if (leg && storagePathOwnedByUser(leg, uid)) {
+    const ll = leg.toLowerCase();
+    if (!leafStorageLower.has(ll) && !seenLower.has(ll)) {
+      out.push({
+        alt: "Post image",
+        src: post.image_url?.trim() || null,
+        storagePath: leg,
+      });
+    }
+  }
+
+  return out;
+}
+
 /**
  * True when this reblog row should show as a new quote layer (commentary and/or image differs from inherited thread media).
  * Plain reblogs (snapshot-only) return false.
@@ -282,6 +334,7 @@ function leafImagesFingerprintFromQuoted(node: QuotedPostNode | null): string {
 export function hasQuoteReblogLayer(post: FeedPost): boolean {
   if (!post.reblog_of?.trim()) return false;
   if (post.reblog_commentary?.trim()) return true;
+  if (reblogAddonOwnImages(post).length > 0) return true;
   const mine = postImagesFingerprint(post);
   const inherited = leafImagesFingerprintFromQuoted(post.quoted_post);
   if (mine && !inherited) return true;
@@ -333,9 +386,13 @@ export function plainReblogViaProfile(post: FeedPost): {
 
 /**
  * Outer-card media for a quote layer: only when the gallery / legacy image set differs from the quoted chain leaf.
+ * Prefer **reblogger add-on** images (paths under this author’s prefix that are not on the leaf); otherwise legacy dedupe.
  */
 export function quoteLayerOuterMedia(post: FeedPost): NormalizedPostImage[] | null {
   if (!hasQuoteReblogLayer(post)) return null;
+  const addon = reblogAddonOwnImages(post);
+  if (addon.length > 0) return addon;
+
   const mine = normalizePostImages(post);
   if (mine.length === 0) return null;
   const inherited = leafImagesFingerprintFromQuoted(post.quoted_post);

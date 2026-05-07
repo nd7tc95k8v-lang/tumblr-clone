@@ -12,7 +12,12 @@ import {
   resolveNsfwFeedModeFromProfileRow,
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
-import { fetchSearchPostsWithTwoTokenFallback, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
+import {
+  fetchSearchPostsWithTwoTokenFallback,
+  normalizeSearchTagList,
+  parseSearchTagMatchMode,
+  type SearchTagMatchMode,
+} from "@/lib/supabase/fetch-search-posts";
 import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
 import { getProfileLinkSlug } from "@/lib/username";
 import { reblogInsertFields } from "@/lib/reblog";
@@ -55,6 +60,11 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     [tagsFromUrl],
   );
 
+  const tagMatchModeFromUrl = useMemo(
+    () => parseSearchTagMatchMode(searchParams.get("tagMode")),
+    [searchParams],
+  );
+
   const hasQuery = qFromUrl.length > 0 || tagsListFromUrl.length > 0;
 
   const initialPostsRef = useRef(initialPosts);
@@ -79,6 +89,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
   const [textQ, setTextQ] = useState(qFromUrl);
   const [tagDraft, setTagDraft] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>(tagsListFromUrl);
+  const [tagMatchMode, setTagMatchMode] = useState<SearchTagMatchMode>(tagMatchModeFromUrl);
 
   useEffect(() => {
     if (!user?.id) {
@@ -97,7 +108,8 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
   useEffect(() => {
     setTextQ(qFromUrl);
     setSelectedTags(tagsListFromUrl);
-  }, [qFromUrl, tagsListFromUrl]);
+    setTagMatchMode(tagMatchModeFromUrl);
+  }, [qFromUrl, tagsListFromUrl, tagMatchModeFromUrl]);
 
   const searchBootstrapSeq = useRef(0);
 
@@ -170,6 +182,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       const postPromise = fetchSearchPostsWithTwoTokenFallback(supabase, {
         rawQ: qFromUrl,
         tagsAny: tagsListFromUrl,
+        tagMatchMode: tagMatchModeFromUrl,
         viewerUserId: user?.id ?? null,
         excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
       });
@@ -202,6 +215,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     hasQuery,
     qFromUrl,
     tagsListFromUrl,
+    tagMatchModeFromUrl,
     user?.id,
     nsfwFeedMode,
     sessionChecked,
@@ -219,9 +233,10 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     const params = new URLSearchParams();
     if (nextQ.length > 0) params.set("q", nextQ);
     if (tags.length > 0) params.set("tags", tags.join(","));
+    if (tagMatchMode === "all") params.set("tagMode", "all");
     const qs = params.toString();
     router.push(qs ? `/search?${qs}` : "/search");
-  }, [router, textQ, selectedTags]);
+  }, [router, textQ, selectedTags, tagMatchMode]);
 
   const addTagFromDraft = useCallback(() => {
     const parsed = parseCommaSeparatedTags(tagDraft);
@@ -307,7 +322,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
           />
         </div>
         <div className="space-y-2">
-          <span className="block text-meta font-medium text-text-secondary">Tags (any match)</span>
+          <span className="block text-meta font-medium text-text-secondary">Tags</span>
           {selectedTags.length > 0 ? (
             <ul className="flex list-none flex-wrap gap-1.5 p-0">
               {selectedTags.map((t) => (
@@ -345,6 +360,24 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
             <button type="button" onClick={addTagFromDraft} className="qrtz-btn-secondary shrink-0 px-4 py-2 text-sm">
               Add tags
             </button>
+          </div>
+          <div className="flex min-w-0 flex-col items-start gap-1 pt-0.5 sm:flex-row sm:items-center sm:gap-2 sm:pt-1">
+            <span className="shrink-0 text-meta text-text-muted">Match mode</span>
+            <label className="min-w-0 w-full max-w-[min(100%,12rem)] sm:w-auto sm:max-w-[13rem]">
+              <span className="sr-only">Tag match mode</span>
+              <select
+                value={tagMatchMode}
+                onChange={(e) => setTagMatchMode(e.target.value === "all" ? "all" : "any")}
+                className="qrtz-field w-full border-border bg-input py-1.5 text-meta text-text shadow-none"
+              >
+                <option value="any" className="bg-input text-text">
+                  Any selected tags
+                </option>
+                <option value="all" className="bg-input text-text">
+                  All selected tags
+                </option>
+              </select>
+            </label>
           </div>
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
@@ -436,8 +469,9 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
         />
       ) : (
         <p className="max-w-md text-center text-sm leading-relaxed text-text-secondary">
-          Enter text, pick one or more tags, or both. Multiple tags match posts that include{" "}
-          <span className="font-medium text-text">any</span> of them.
+          Enter text, pick one or more tags, or both. Use the tag match control to require{" "}
+          <span className="font-medium text-text">any</span> or <span className="font-medium text-text">all</span> of
+          the selected tags.
         </p>
       )}
 

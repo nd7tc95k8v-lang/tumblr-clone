@@ -52,7 +52,7 @@ function normalizeChainQueryRow(row: ChainQueryRow): ChainPostRow {
     original_post_id: threadRootPostId(row),
     is_nsfw: Boolean(row.is_nsfw),
     image_storage_path: path,
-    post_images: coercePostImageRows(row.post_images),
+    post_images: coercePostImageRows(row.post_images, row.id),
     tags: coercePostTags(row.tags),
   };
 }

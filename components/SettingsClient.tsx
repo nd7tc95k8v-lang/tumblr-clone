@@ -10,6 +10,17 @@ import ThemeAppearanceSettings from "./ThemeAppearanceSettings";
 import ContentSafetySettings from "./ContentSafetySettings";
 import FollowedTagsSettings from "./FollowedTagsSettings";
 
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-card border border-border bg-surface shadow-sm">
+      <div className="px-4 py-5 sm:px-6 sm:py-6">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted">{title}</h2>
+        <div className="mt-4 flex flex-col gap-4 sm:mt-5">{children}</div>
+      </div>
+    </section>
+  );
+}
+
 export default function SettingsClient() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
@@ -49,72 +60,80 @@ export default function SettingsClient() {
 
   if (!supabase) {
     return (
-      <div className="w-full max-w-2xl md:max-w-3xl rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
+      <div className="w-full max-w-4xl rounded-card border border-warning/40 bg-warning/10 p-4 text-sm text-text">
         <p className="font-medium">Supabase is not configured.</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-2xl md:max-w-3xl flex flex-col gap-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="md:col-span-2">
-          <ThemeAppearanceSettings />
-        </div>
-        {user ? <ContentSafetySettings supabase={supabase} user={user} /> : null}
-        {user ? <FollowedTagsSettings supabase={supabase} user={user} /> : null}
-        <section className={user ? "qrtz-card" : "qrtz-card md:col-span-2"}>
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-text-muted mb-3">Account</h2>
-          {user ? (
-            <div className="flex flex-col gap-4">
-              <p className="text-sm text-text-secondary">
-                {username ? (
-                  <>
-                    Signed in as{" "}
-                    <ProfileUsernameLink usernameRaw={username} className="font-medium text-inherit">
-                      @{username}
-                    </ProfileUsernameLink>
-                  </>
-                ) : (
-                  <>Signed in.</>
-                )}
-              </p>
-              {username ? (
-                <Link
-                  href={`/profile/${encodeURIComponent(normalizeUsername(username))}`}
-                  className="text-sm font-medium text-link hover:text-link-hover hover:underline w-fit transition-colors"
-                >
-                  Open your profile
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                disabled={loading}
-                onClick={async () => {
-                  setLoading(true);
-                  await supabase.auth.signOut();
-                  setLoading(false);
-                  void refresh();
-                }}
-                className="qrtz-btn-secondary w-fit px-4 py-2 text-sm"
-              >
-                {loading ? "Signing out…" : "Sign out"}
-              </button>
-            </div>
-          ) : (
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 sm:gap-10">
+      <SettingsSection title="Appearance">
+        <ThemeAppearanceSettings />
+      </SettingsSection>
+
+      {user ? (
+        <SettingsSection title="Followed Tags">
+          <FollowedTagsSettings supabase={supabase} user={user} />
+        </SettingsSection>
+      ) : null}
+
+      {user ? (
+        <SettingsSection title="Content & Safety">
+          <ContentSafetySettings supabase={supabase} user={user} />
+        </SettingsSection>
+      ) : null}
+
+      <SettingsSection title="Account">
+        {user ? (
+          <div className="flex flex-col gap-4">
             <p className="text-sm text-text-secondary">
-              You&apos;re not signed in.{" "}
-              <Link
-                href="/"
-                className="text-link font-medium hover:text-link-hover hover:underline transition-colors"
-              >
-                Go to Home
-              </Link>{" "}
-              to sign in.
+              {username ? (
+                <>
+                  Signed in as{" "}
+                  <ProfileUsernameLink usernameRaw={username} className="font-medium text-inherit">
+                    @{username}
+                  </ProfileUsernameLink>
+                </>
+              ) : (
+                <>Signed in.</>
+              )}
             </p>
-          )}
-        </section>
-      </div>
+            {username ? (
+              <Link
+                href={`/profile/${encodeURIComponent(normalizeUsername(username))}`}
+                className="w-fit text-sm font-medium text-link transition-colors hover:text-link-hover hover:underline"
+              >
+                Open your profile
+              </Link>
+            ) : null}
+            <button
+              type="button"
+              disabled={loading}
+              onClick={async () => {
+                setLoading(true);
+                await supabase.auth.signOut();
+                setLoading(false);
+                void refresh();
+              }}
+              className="qrtz-btn-secondary w-fit px-4 py-2 text-sm"
+            >
+              {loading ? "Signing out…" : "Sign out"}
+            </button>
+          </div>
+        ) : (
+          <p className="text-sm text-text-secondary">
+            You&apos;re not signed in.{" "}
+            <Link
+              href="/"
+              className="font-medium text-link transition-colors hover:text-link-hover hover:underline"
+            >
+              Go to Home
+            </Link>{" "}
+            to sign in.
+          </p>
+        )}
+      </SettingsSection>
     </div>
   );
 }

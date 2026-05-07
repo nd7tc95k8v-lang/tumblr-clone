@@ -58,18 +58,26 @@ export function postImagesFingerprint(post: PostWithImages): string {
     .join("\u001f");
 }
 
-/** Coerce Supabase/PostgREST `post_images` embed into sorted rows. */
-export function coercePostImageRows(raw: unknown): PostImageRow[] | null {
+/**
+ * Coerce Supabase/PostgREST `post_images` embed into sorted rows.
+ * `parentPostId` supplies `post_id` when the embed omits the redundant FK (rows would otherwise be dropped).
+ * A synthetic `id` is used when the row id is missing so gallery normalization still runs.
+ */
+export function coercePostImageRows(raw: unknown, parentPostId?: string): PostImageRow[] | null {
   if (!Array.isArray(raw) || raw.length === 0) return null;
   const out: PostImageRow[] = [];
+  const fallbackPostId = parentPostId?.trim() ?? "";
   for (const r of raw) {
     if (!r || typeof r !== "object") continue;
     const o = r as Record<string, unknown>;
-    const id = String(o.id ?? "");
-    const postId = String(o.post_id ?? "");
     const storage_path = String(o.storage_path ?? "").trim();
     const position = Number(o.position ?? 0);
-    if (!id || !postId || !storage_path) continue;
+    const postId = String(o.post_id ?? fallbackPostId).trim();
+    let id = String(o.id ?? "").trim();
+    if (!postId || !storage_path) continue;
+    if (!id) {
+      id = `coerced:${postId}:${String(position)}:${storage_path.slice(-48)}`;
+    }
     out.push({
       id,
       post_id: postId,

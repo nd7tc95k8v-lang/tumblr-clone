@@ -246,6 +246,8 @@ type Props = {
     commentary?: string | null,
     tags?: string[],
     editorMarksMature?: boolean,
+    /** Editor reblog only; omitted on Quick reblog. */
+    images?: File[],
   ) => boolean | Promise<boolean>;
   /** Default checked state for modal “Mark this reblog mature” when source is SFW. */
   viewerDefaultPostsNsfw?: boolean;
@@ -302,7 +304,7 @@ function errorMessageFromUnknown(err: unknown, fallback: string): string {
 }
 
 function buildMediaSlotsFromPost(post: FeedPost): MediaSlot[] {
-  const rows = coercePostImageRows(post.post_images);
+  const rows = coercePostImageRows(post.post_images, post.id);
   if (rows?.length) {
     return rows.map((r) => ({
       kind: "row" as const,
@@ -1543,7 +1545,7 @@ export default function PostCard({
           setReblogModalError(null);
           setReblogModalPost(null);
         }}
-        onConfirm={async ({ commentary, tags, isNsfw }) => {
+        onConfirm={async ({ commentary, tags, isNsfw, images }) => {
           if (!reblogModalPost) return;
           const trimmed = commentary.trim();
           const guard = validateUserWrittenContent(trimmed, { allowEmpty: true });
@@ -1556,7 +1558,7 @@ export default function PostCard({
           try {
             const editorMarksMature =
               reblogModalPost.is_nsfw === true ? false : Boolean(isNsfw);
-            const ok = await onReblog(reblogModalPost, trimmed, tags, editorMarksMature);
+            const ok = await onReblog(reblogModalPost, trimmed, tags, editorMarksMature, images);
             if (ok && trimmed.length > 0) {
               recordSuccessfulUserWrittenPost(normalizePostBodyForDedup(trimmed));
             }

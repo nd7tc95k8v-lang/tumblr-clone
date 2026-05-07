@@ -1,7 +1,11 @@
 import React, { Suspense } from "react";
 import type { Metadata } from "next";
 import SearchClient from "../../../components/SearchClient";
-import { fetchSearchPostsWithTwoTokenFallback, normalizeSearchTagList } from "@/lib/supabase/fetch-search-posts";
+import {
+  fetchSearchPostsWithTwoTokenFallback,
+  normalizeSearchTagList,
+  parseSearchTagMatchMode,
+} from "@/lib/supabase/fetch-search-posts";
 import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 import type { FeedPost } from "@/types/post";
@@ -18,13 +22,14 @@ function parseTagsParam(raw: string | undefined): string[] {
 }
 
 type PageProps = {
-  searchParams: Promise<{ q?: string; tags?: string }>;
+  searchParams: Promise<{ q?: string; tags?: string; tagMode?: string }>;
 };
 
 export default async function SearchPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   const q = typeof sp.q === "string" ? sp.q.trim() : "";
   const tagsList = parseTagsParam(sp.tags);
+  const tagMatchMode = parseSearchTagMatchMode(typeof sp.tagMode === "string" ? sp.tagMode : null);
   const hasQuery = q.length > 0 || tagsList.length > 0;
 
   const supabase = createAnonServerClient();
@@ -36,6 +41,7 @@ export default async function SearchPage({ searchParams }: PageProps) {
     const postPromise = fetchSearchPostsWithTwoTokenFallback(supabase, {
       rawQ: q,
       tagsAny: tagsList,
+      tagMatchMode,
       viewerUserId: null,
     });
     const userPromise = q.length > 0 ? fetchSearchUsers(supabase, q) : Promise.resolve({ data: [], error: null });
