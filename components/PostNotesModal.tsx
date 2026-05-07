@@ -84,10 +84,11 @@ type Props = {
   onThreadNoteCountDelta?: (delta: number) => void;
   /**
    * When true for an open session, focuses the “Add a short note” textarea after the initial notes load
-   * finishes (signed-in + supabase only). The **Notes** footer control leaves this unset/false so default
-   * behavior is unchanged.
+   * finishes (signed-in + supabase only). Ignored when `showComposer` is false.
    */
   focusComposerOnOpen?: boolean;
+  /** When false, hides the note composer UI; timeline and delete-own-comment remain. */
+  showComposer?: boolean;
 };
 
 const DELETE_NOTE_BTN =
@@ -112,15 +113,14 @@ function rowKindAccent(kind: PostNoteKind): string {
   return "bg-sky-500/80";
 }
 
-function groupKey(note: PostNote): "reblog" | "like" | "comment" {
+/** Section for timeline headings: likes + reblogs share one chronological bucket; comments stay separate. */
+function groupKey(note: PostNote): "activity" | "comment" {
   if (note.kind === "comment") return "comment";
-  if (note.kind === "reblog") return "reblog";
-  return "like";
+  return "activity";
 }
 
-function groupHeading(key: "reblog" | "like" | "comment"): string {
-  if (key === "reblog") return "Reblogs";
-  if (key === "like") return "Likes";
+function groupHeading(key: "activity" | "comment"): string {
+  if (key === "activity") return "Likes & reblogs";
   return "Notes & replies";
 }
 
@@ -156,6 +156,7 @@ export default function PostNotesModal({
   prototypeAnchorScopedNotesComments,
   onThreadNoteCountDelta,
   focusComposerOnOpen = false,
+  showComposer = true,
 }: Props) {
   const { runProtectedAction } = useActionGuard();
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -320,12 +321,13 @@ export default function PostNotesModal({
   useEffect(() => {
     // Wait until summary totals exist so we are past the initial fetch reset (`total` cleared at load start)
     // and the composer textarea is enabled (avoids a one-frame focus while `loading` is still stale).
-    if (!open || !focusComposerOnOpen || total === null || error || !currentUserId || !supabase) return;
+    if (!open || !showComposer || !focusComposerOnOpen || total === null || error || !currentUserId || !supabase)
+      return;
     const id = window.requestAnimationFrame(() => {
       composerTextareaRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(id);
-  }, [open, focusComposerOnOpen, total, error, currentUserId, supabase]);
+  }, [open, showComposer, focusComposerOnOpen, total, error, currentUserId, supabase]);
 
   const handleFollowToggle = useCallback(
     async (targetUserId: string, isFollowing: boolean) => {
@@ -378,7 +380,7 @@ export default function PostNotesModal({
   );
 
   const handleSubmitComment = useCallback(async () => {
-    if (!supabase || !currentUserId) return;
+    if (!showComposer || !supabase || !currentUserId) return;
     const notesThreadRootKey = shippedNotesModalThreadRootKey(threadRootPostId);
     if (!notesThreadRootKey) return;
 
@@ -440,6 +442,7 @@ export default function PostNotesModal({
       setComposerSubmitting(false);
     }
   }, [
+    showComposer,
     supabase,
     currentUserId,
     threadRootPostId,
@@ -485,7 +488,7 @@ export default function PostNotesModal({
 
   const listBlocks = useMemo(() => {
     const blocks: { heading: string | null; note: PostNote }[] = [];
-    let prev: "reblog" | "like" | "comment" | null = null;
+    let prev: "activity" | "comment" | null = null;
     for (const note of notes) {
       const k = groupKey(note);
       const heading = prev === null || k !== prev ? groupHeading(k) : null;
@@ -530,8 +533,7 @@ export default function PostNotesModal({
           Notes
         </h2>
         <p className="mb-3 text-meta leading-snug text-text-muted">
-          Likes, reblogs, and short replies on this thread — same vibe as classic Tumblr notes, without full
-          threading.
+          Likes, reblogs, and short replies on this thread
         </p>
 
         <div className="mb-3 rounded-card border border-border/60 bg-bg-secondary/25 px-3 py-2.5 dark:bg-bg-secondary/35">
@@ -712,47 +714,49 @@ export default function PostNotesModal({
           </ul>
         ) : null}
 
-        <div className="mb-4 border-t border-border/80 pt-3">
-          {currentUserId && supabase ? (
-            <>
-              <label htmlFor="post-note-comment" className="mb-1 block text-meta font-medium text-text-secondary">
-                Add a short note
-              </label>
-              <textarea
-                ref={composerTextareaRef}
-                id="post-note-comment"
-                rows={2}
-                maxLength={NOTE_COMMENT_MAX_LEN}
-                value={composerText}
-                disabled={composerSubmitting || Boolean(loading)}
-                onChange={(e) => {
-                  setComposerText(e.target.value);
-                  if (composerError) setComposerError(null);
-                }}
-                placeholder="Say something quick — this is not threaded comments."
-                className="qrtz-field mb-2 w-full resize-none py-2 text-sm leading-snug"
-              />
-              <div className="mb-2 flex items-center justify-between gap-2 text-meta text-text-muted">
-                <span>
-                  {composerText.length}/{NOTE_COMMENT_MAX_LEN}
-                </span>
-                <button
-                  type="button"
-                  disabled={composerSubmitting || loading || !composerText.trim()}
-                  onClick={() => void handleSubmitComment()}
-                  className="qrtz-btn-primary px-3 py-1.5 text-sm disabled:pointer-events-none disabled:opacity-45"
-                >
-                  {composerSubmitting ? "Sending…" : "Post note"}
-                </button>
-              </div>
-              <InlineErrorBanner message={composerError} onDismiss={() => setComposerError(null)} className="mb-0" />
-            </>
-          ) : (
-            <p className="text-meta leading-relaxed text-text-muted">
-              Sign in to leave a short note on this thread. Everyone who can see the post can read notes here.
-            </p>
-          )}
-        </div>
+        {showComposer ? (
+          <div className="mb-4 border-t border-border/80 pt-3">
+            {currentUserId && supabase ? (
+              <>
+                <label htmlFor="post-note-comment" className="mb-1 block text-meta font-medium text-text-secondary">
+                  Add a short note
+                </label>
+                <textarea
+                  ref={composerTextareaRef}
+                  id="post-note-comment"
+                  rows={2}
+                  maxLength={NOTE_COMMENT_MAX_LEN}
+                  value={composerText}
+                  disabled={composerSubmitting || Boolean(loading)}
+                  onChange={(e) => {
+                    setComposerText(e.target.value);
+                    if (composerError) setComposerError(null);
+                  }}
+                  placeholder="Say something quick — this is not threaded comments."
+                  className="qrtz-field mb-2 w-full resize-none py-2 text-sm leading-snug"
+                />
+                <div className="mb-2 flex items-center justify-between gap-2 text-meta text-text-muted">
+                  <span>
+                    {composerText.length}/{NOTE_COMMENT_MAX_LEN}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={composerSubmitting || loading || !composerText.trim()}
+                    onClick={() => void handleSubmitComment()}
+                    className="qrtz-btn-primary px-3 py-1.5 text-sm disabled:pointer-events-none disabled:opacity-45"
+                  >
+                    {composerSubmitting ? "Sending…" : "Post note"}
+                  </button>
+                </div>
+                <InlineErrorBanner message={composerError} onDismiss={() => setComposerError(null)} className="mb-0" />
+              </>
+            ) : (
+              <p className="text-meta leading-relaxed text-text-muted">
+                Sign in to leave a short note on this thread. Everyone who can see the post can read notes here.
+              </p>
+            )}
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
           <button type="button" onClick={onClose} className="qrtz-btn-secondary px-4 py-2 text-sm">

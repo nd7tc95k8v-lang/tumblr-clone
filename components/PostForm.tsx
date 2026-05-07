@@ -198,10 +198,13 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
     }
 
     const trimmedContent = content.trim();
-    const written = validateUserWrittenContent(trimmedContent, { allowEmpty: false });
-    if (!written.ok) {
-      setFormError(written.message);
-      return;
+    const hasSelectedImages = selectedFiles.length > 0;
+    if (!(trimmedContent === "" && hasSelectedImages)) {
+      const written = validateUserWrittenContent(trimmedContent, { allowEmpty: false });
+      if (!written.ok) {
+        setFormError(written.message);
+        return;
+      }
     }
 
     setSubmitting(true);
@@ -331,7 +334,6 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
           onBlur={handleTextareaBlur}
           onKeyDown={handleTextareaKeyDown}
           placeholder="What's on your mind?"
-          required
         />
         <div
           role="button"

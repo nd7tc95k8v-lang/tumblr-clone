@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
@@ -468,10 +468,16 @@ export default function PostCard({
   const [noteCommentAdjust, setNoteCommentAdjust] = useState(0);
   const [quoteChainExpanded, setQuoteChainExpanded] = useState(false);
   const [notesModalOpen, setNotesModalOpen] = useState(false);
+  /** Timeline-only vs timeline + composer (see Note button vs notes counter). */
+  const [notesModalShowComposer, setNotesModalShowComposer] = useState(false);
   /** When opening via “Leave a note”, `PostNotesModal` focuses the composer after load. */
   const [notesModalFocusComposer, setNotesModalFocusComposer] = useState(false);
   /** Per-card, session-only: reveal gated feed body/media after viewer opts in. */
   const [nsfwRevealed, setNsfwRevealed] = useState(false);
+  /** Tag chips: show full wrapped list vs single clamped row (local UI only). */
+  const [tagsExpanded, setTagsExpanded] = useState(false);
+  /** True when clamped tag list content exceeds one row (from clip wrapper scroll overflow). */
+  const [tagsOverflowing, setTagsOverflowing] = useState(false);
 
   const { liked, likeCount, likeBusy, likeError, dismissLikeError, toggleLike } = usePostLikeToggle({
     supabase,
@@ -490,9 +496,14 @@ export default function PostCard({
   }, [post.id, post.note_comment_count]);
 
   useEffect(() => {
+    setTagsExpanded(false);
+  }, [post.id]);
+
+  useEffect(() => {
     setQuoteChainExpanded(false);
     setNsfwRevealed(false);
   }, [post.id, nsfwFeedMode]);
+
   const header = postCardHeaderProfile(post);
   const { primary, primaryRaw, primaryAvatarUrl } = header;
   const isReblog = Boolean(post.reblog_of?.trim());
@@ -500,6 +511,29 @@ export default function PostCard({
   const plainResolved = resolvePlainReblogDisplay(post);
   const fallbackBody = bodyFromPost(post);
   const tags = displayTagsForPost(post);
+  const tagsClipRef = useRef<HTMLDivElement>(null);
+  const tagsSignature = tags.join("\u0001");
+  useLayoutEffect(() => {
+    const el = tagsClipRef.current;
+    if (!el || tags.length === 0) {
+      setTagsOverflowing(false);
+      return;
+    }
+    const update = () => {
+      if (tagsExpanded) {
+        setTagsOverflowing(false);
+        return;
+      }
+      const next = el.scrollHeight > el.clientHeight + 1;
+      setTagsOverflowing((prev) => (prev === next ? prev : next));
+    };
+    update();
+    const ro = new ResizeObserver(() => {
+      update();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tags.length, tagsSignature, tagsExpanded, post.id]);
   const highlightSet =
     searchHighlightTags && searchHighlightTags.length > 0 ? new Set(searchHighlightTags) : null;
   const commentary = post.reblog_commentary?.trim() || null;
@@ -1098,21 +1132,46 @@ export default function PostCard({
             </>
           )}
           {tags.length > 0 ? (
-            <ul className="mt-2.5 max-md:mt-2 flex list-none flex-wrap gap-1.5 max-md:gap-1 p-0">
-              {tags.map((t) => (
-                <li key={t}>
-                  <Link
-                    href={`/tag/${encodeURIComponent(t)}`}
-                    className={`${TAG_CHIP_BASE} ${TAG_CHIP_MOBILE_SHELL} ${
-                      highlightSet?.has(t)
-                        ? `${TAG_CHIP_HIGHLIGHT} ${TAG_CHIP_HIGHLIGHT_MOBILE_SOFT}`
-                        : `${TAG_CHIP_DEFAULT} ${TAG_CHIP_DEFAULT_MOBILE_SOFT}`
-                    }`}
+            <ul className="mt-2.5 max-md:mt-2 flex list-none flex-nowrap items-start gap-x-1.5 gap-y-0 max-md:gap-x-1 p-0">
+              <li className="min-w-0 flex-1">
+                <div
+                  ref={tagsClipRef}
+                  className={
+                    tagsExpanded
+                      ? undefined
+                      : "overflow-hidden max-h-[2.375rem] md:max-h-[2.125rem]"
+                  }
+                >
+                  <ul className="flex list-none flex-wrap gap-1.5 max-md:gap-1 p-0">
+                    {tags.map((t) => (
+                      <li key={t}>
+                        <Link
+                          href={`/tag/${encodeURIComponent(t)}`}
+                          className={`${TAG_CHIP_BASE} ${TAG_CHIP_MOBILE_SHELL} ${
+                            highlightSet?.has(t)
+                              ? `${TAG_CHIP_HIGHLIGHT} ${TAG_CHIP_HIGHLIGHT_MOBILE_SOFT}`
+                              : `${TAG_CHIP_DEFAULT} ${TAG_CHIP_DEFAULT_MOBILE_SOFT}`
+                          }`}
+                        >
+                          #{t}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </li>
+              {tagsOverflowing || tagsExpanded ? (
+                <li className="inline-flex shrink-0 items-center self-start pt-px max-md:pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setTagsExpanded((v) => !v)}
+                    className="inline-flex min-h-[1.5rem] max-md:min-h-[1.75rem] items-center rounded-full border border-transparent px-2 py-0.5 max-md:px-1.5 max-md:py-px text-meta font-medium leading-snug text-text-secondary/90 underline-offset-2 transition-[color,background-color,border-color] duration-200 ease-out hover:border-border/50 hover:bg-bg-secondary/45 hover:text-link focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 max-md:text-[0.6875rem] max-md:font-normal max-md:leading-snug"
+                    aria-expanded={tagsExpanded}
                   >
-                    #{t}
-                  </Link>
+                    {tagsExpanded ? "Show less" : "Show more"}
+                  </button>
                 </li>
-              ))}
+              ) : null}
             </ul>
           ) : null}
           <InlineErrorBanner
@@ -1131,6 +1190,7 @@ export default function PostCard({
                 type="button"
                 disabled={!supabase}
                 onClick={() => {
+                  setNotesModalShowComposer(false);
                   setNotesModalFocusComposer(false);
                   setNotesModalOpen(true);
                 }}
@@ -1250,6 +1310,7 @@ export default function PostCard({
                 type="button"
                 disabled={!supabase}
                 onClick={() => {
+                  setNotesModalShowComposer(true);
                   setNotesModalFocusComposer(true);
                   setNotesModalOpen(true);
                 }}
@@ -1365,8 +1426,10 @@ export default function PostCard({
         open={notesModalOpen}
         onClose={() => {
           setNotesModalOpen(false);
+          setNotesModalShowComposer(false);
           setNotesModalFocusComposer(false);
         }}
+        showComposer={notesModalShowComposer}
         focusComposerOnOpen={notesModalFocusComposer}
         supabase={supabase}
         currentUserId={currentUserId}
