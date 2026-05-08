@@ -173,23 +173,6 @@ export async function hydrateFeedPostsFromQueryRows(
       card_engagement_owner_post_id: "",
     };
     mergedRow.card_engagement_owner_post_id = noteOwnerPostIdForCard(mergedRow);
-    if (
-      process.env.NODE_ENV === "development" &&
-      mergedRow.reblog_of?.trim() &&
-      mergedRow.post_images &&
-      mergedRow.post_images.length > 0
-    ) {
-      const uid = mergedRow.user_id?.trim().toLowerCase() ?? "";
-      const uidPrefix = uid ? `${uid}/` : "";
-      const paths = mergedRow.post_images.map((r) => r.storage_path?.trim()).filter(Boolean) as string[];
-      if (uidPrefix && paths.length && !paths.some((p) => p.toLowerCase().startsWith(uidPrefix))) {
-        console.debug("[reblog-attach] hydrate: reblog row post_images have no paths under author prefix", {
-          postId: mergedRow.id,
-          userId: mergedRow.user_id,
-          paths,
-        });
-      }
-    }
     return mergedRow;
   });
 

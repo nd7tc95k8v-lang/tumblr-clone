@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
-import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   DEFAULT_NSFW_FEED_MODE,
@@ -12,10 +11,9 @@ import {
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
-import { reblogInsertFields } from "@/lib/reblog";
 import type { FeedPost } from "@/types/post";
-import { useActionGuard } from "./ActionGuardProvider";
 import Feed from "./Feed";
+import { useReblogAction } from "./useReblogAction";
 
 type Props = {
   initialPosts: FeedPost[];
@@ -23,7 +21,6 @@ type Props = {
 };
 
 export default function ExploreClient({ initialPosts, initialLoadError }: Props) {
-  const { runProtectedAction } = useActionGuard();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
   const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
@@ -130,39 +127,9 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
     if (!fetchError) setPosts(data ?? []);
   }, [supabase, initialPosts]);
 
-  const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
-      if (!supabase) return false;
-      const {
-        data: { user: u },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !u) {
-        alert("You must be logged in to reblog.");
-        return false;
-      }
-      let succeeded = false;
-      await runProtectedAction(supabase, { kind: "reblog" }, async () => {
-        const { error: insertError } = await supabase.from("posts").insert({
-          user_id: u.id,
-          ...reblogInsertFields(original, {
-            commentary,
-            tags: tags ?? [],
-            editorMarksMature: commentary === null ? undefined : editorMarksMature,
-          }),
-        });
-        if (insertError) {
-          console.error(insertError);
-          await alertIfLikelyRateOrGuardFailure(supabase, insertError, { kind: "reblog" });
-          return;
-        }
-        succeeded = true;
-        await refreshSignedInFeed();
-      });
-      return succeeded;
-    },
-    [supabase, runProtectedAction, refreshSignedInFeed],
-  );
+  const handleReblog = useReblogAction(supabase, {
+    onSuccess: refreshSignedInFeed,
+  });
 
   if (!supabase) {
     return (

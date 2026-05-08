@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
-import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   followNormalizedTagForUser,
@@ -17,10 +16,9 @@ import {
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
 import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
-import { reblogInsertFields } from "@/lib/reblog";
 import type { FeedPost } from "@/types/post";
-import { useActionGuard } from "./ActionGuardProvider";
 import Feed from "./Feed";
+import { useReblogAction } from "./useReblogAction";
 
 type Props = {
   tag: string;
@@ -31,7 +29,6 @@ type Props = {
 };
 
 export default function TagPageClient({ tag, initialPosts, initialLoadError, postCount }: Props) {
-  const { runProtectedAction } = useActionGuard();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
@@ -182,39 +179,9 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
     }
   }, [supabase, user, tag, tagFollowBusy, tagFollowed]);
 
-  const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
-      if (!supabase) return false;
-      const {
-        data: { user: u },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !u) {
-        alert("You must be logged in to reblog.");
-        return false;
-      }
-      let succeeded = false;
-      await runProtectedAction(supabase, { kind: "reblog" }, async () => {
-        const { error: insertError } = await supabase.from("posts").insert({
-          user_id: u.id,
-          ...reblogInsertFields(original, {
-            commentary,
-            tags: tags ?? [],
-            editorMarksMature: commentary === null ? undefined : editorMarksMature,
-          }),
-        });
-        if (insertError) {
-          console.error(insertError);
-          await alertIfLikelyRateOrGuardFailure(supabase, insertError, { kind: "reblog" });
-          return;
-        }
-        succeeded = true;
-        await loadPosts();
-      });
-      return succeeded;
-    },
-    [supabase, loadPosts, runProtectedAction],
-  );
+  const handleReblog = useReblogAction(supabase, {
+    onSuccess: loadPosts,
+  });
 
   if (!supabase) {
     return (

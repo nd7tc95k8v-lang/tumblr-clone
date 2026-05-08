@@ -5,14 +5,13 @@ import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
 import { preparePostImageForUpload } from "@/lib/post-image-prep";
-import { coercePostImageRows, devNormalizedImageStoragePathsForQuoteMediaDiag } from "@/lib/post-images";
+import { coercePostImageRows } from "@/lib/post-images";
 import { postElementDomId, postPermalinkPath } from "@/lib/post-anchor";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
 import { coercePostTags, displayTagsForPost, parseCommaSeparatedTags } from "@/lib/tags";
 import {
   bodyFromPost,
-  debugLogQuoteReblogMediaHydration,
   formatRelativePostTime,
   hasQuoteReblogLayer,
   postCardHeaderAttribution,
@@ -1015,44 +1014,6 @@ export default function PostCard({
     chainExpanded: quoteChainExpanded,
     onExpandChain: () => setQuoteChainExpanded(true),
   } as const;
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
-    if (!hasQuoteReblogLayer(post)) return;
-    debugLogQuoteReblogMediaHydration(post);
-  }, [post]);
-
-  useEffect(() => {
-    if (process.env.NODE_ENV !== "development") return;
-    if (!post.reblog_of?.trim()) return;
-
-    const normalizedPaths = devNormalizedImageStoragePathsForQuoteMediaDiag(post);
-    const uid = post.user_id?.trim() ?? "";
-    const uidPrefix = `${uid.toLowerCase()}/`;
-    const anyPathStartsWithUserIdPrefix = normalizedPaths.some((p) =>
-      p.toLowerCase().startsWith(uidPrefix),
-    );
-    const outer = quoteLayerOuterMedia(post);
-    const quoteLayerOuterMediaPathsOrNull =
-      outer === null ? null : outer.map((o) => (o.storagePath || o.src || "").trim()).filter(Boolean);
-    const plain = resolvePlainReblogDisplay(post);
-
-    console.debug("[reblog-row-media]", {
-      postId: post.id,
-      userId: post.user_id,
-      reblogOf: post.reblog_of,
-      originalPostId: post.original_post_id,
-      reblogCommentary: post.reblog_commentary,
-      hasQuoteReblogLayer: hasQuoteReblogLayer(post),
-      resolvePlainReblogDisplayKind: plain?.kind ?? null,
-      normalizedImageStoragePaths: normalizedPaths,
-      anyPathStartsWithUserIdPrefix,
-      quoteLayerOuterMediaPathsOrNull,
-      quotedPostId: post.quoted_post?.id,
-      quotedPostUserId: post.quoted_post?.user_id,
-      quotedPostReblogOf: post.quoted_post?.reblog_of,
-    });
-  }, [post]);
 
   const postTime = formatRelativePostTime(post.created_at);
   const effectiveNoteCommentCount = Math.max(0, post.note_comment_count + noteCommentAdjust);

@@ -344,14 +344,16 @@ export default function ReblogModal({
           <button
             type="button"
             disabled={busy}
-            onClick={() =>
-              void onConfirm({
+            onClick={() => {
+              const tags = parseCommaSeparatedTags(tagsRaw);
+              const payload = {
                 commentary: text,
-                tags: parseCommaSeparatedTags(tagsRaw),
+                tags,
                 images: selectedFiles,
                 ...(sourceIsMature ? {} : { isNsfw: markMature }),
-              })
-            }
+              };
+              void onConfirm(payload);
+            }}
             className="qrtz-btn-primary px-4 py-2 text-sm"
           >
             {busy ? "Reblogging…" : "Reblog"}

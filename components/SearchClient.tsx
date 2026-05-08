@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
   DEFAULT_NSFW_FEED_MODE,
@@ -20,12 +19,11 @@ import {
 } from "@/lib/supabase/fetch-search-posts";
 import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
 import { getProfileLinkSlug } from "@/lib/username";
-import { reblogInsertFields } from "@/lib/reblog";
 import { normalizeTagSegment, parseCommaSeparatedTags } from "@/lib/tags";
 import type { FeedPost } from "@/types/post";
-import { useActionGuard } from "./ActionGuardProvider";
 import Feed from "./Feed";
 import ProfileAvatar from "./ProfileAvatar";
+import { useReblogAction } from "./useReblogAction";
 
 type Props = {
   initialPosts: FeedPost[];
@@ -48,7 +46,6 @@ function uniqueSortedTagsFromPosts(posts: FeedPost[]): string[] {
 }
 
 export default function SearchClient({ initialPosts, initialLoadError, initialUsers }: Props) {
-  const { runProtectedAction } = useActionGuard();
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -256,39 +253,9 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     return inResults.filter((t) => !selected.has(t)).slice(0, 24);
   }, [hasQuery, posts, tagsListFromUrl]);
 
-  const handleReblog = useCallback(
-    async (original: FeedPost, commentary?: string | null, tags?: string[], editorMarksMature?: boolean) => {
-      if (!supabase) return false;
-      const {
-        data: { user: u },
-        error: userError,
-      } = await supabase.auth.getUser();
-      if (userError || !u) {
-        alert("You must be logged in to reblog.");
-        return false;
-      }
-      let succeeded = false;
-      await runProtectedAction(supabase, { kind: "reblog" }, async () => {
-        const { error: insertError } = await supabase.from("posts").insert({
-          user_id: u.id,
-          ...reblogInsertFields(original, {
-            commentary,
-            tags: tags ?? [],
-            editorMarksMature: commentary === null ? undefined : editorMarksMature,
-          }),
-        });
-        if (insertError) {
-          console.error(insertError);
-          await alertIfLikelyRateOrGuardFailure(supabase, insertError, { kind: "reblog" });
-          return;
-        }
-        succeeded = true;
-        await loadPosts();
-      });
-      return succeeded;
-    },
-    [supabase, loadPosts, runProtectedAction],
-  );
+  const handleReblog = useReblogAction(supabase, {
+    onSuccess: loadPosts,
+  });
 
   if (!supabase) {
     return (

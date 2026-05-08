@@ -1,5 +1,4 @@
 import {
-  devNormalizedImageStoragePathsForQuoteMediaDiag,
   normalizePostImages,
   postImagesFingerprint,
   type NormalizedPostImage,
@@ -501,38 +500,6 @@ export function quoteLayerOuterMedia(post: FeedPost): NormalizedPostImage[] | nu
   const mineFp = postImagesFingerprint(post);
   if (!inherited || mineFp !== inherited) return mine;
   return null;
-}
-
-/**
- * Temporary DEV-only: compact `console.debug` for quote-reblog row media after hydration.
- * Remove when investigation is complete.
- */
-export function debugLogQuoteReblogMediaHydration(post: FeedPost): void {
-  if (process.env.NODE_ENV !== "development") return;
-  if (!hasQuoteReblogLayer(post)) return;
-
-  const normalizedStoragePaths = devNormalizedImageStoragePathsForQuoteMediaDiag(post);
-  const uid = post.user_id?.trim() ?? "";
-  const uidPrefix = `${uid.toLowerCase()}/`;
-  const anyStoragePathStartsWithUserIdPrefix = normalizedStoragePaths.some((p) =>
-    p.toLowerCase().startsWith(uidPrefix),
-  );
-  const addon = reblogAddonOwnImages(post);
-  const reblogAddonPaths = addon.map((i) => (i.storagePath || "").trim()).filter(Boolean);
-  const mineFp = postImagesFingerprint(post);
-  const leafFp = leafImagesFingerprintFromQuoted(post.quoted_post);
-  const outer = quoteLayerOuterMedia(post);
-
-  console.debug("[quote-reblog-media]", {
-    postId: post.id,
-    userId: post.user_id,
-    normalizedStoragePaths,
-    reblogAddonOwnImages: reblogAddonPaths,
-    postImagesFingerprint: mineFp,
-    leafImagesFingerprintFromQuoted: leafFp,
-    quoteLayerOuterMediaIsNull: outer === null,
-    anyStoragePathStartsWithUserIdPrefix,
-  });
 }
 
 export type PlainReblogResolved =
