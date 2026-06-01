@@ -84,17 +84,69 @@ export default function PostMediaGallery({
     );
   }
 
-  if (images.length === 2) {
-    return (
-      <>
-        <div className={`grid grid-cols-2 gap-1 ${wrapperClassName}`}>
-          {images.map((im, i) => (
+  return (
+    <>
+      <PostMediaCarousel
+        images={images}
+        supabase={supabase}
+        imgClass={imgClass}
+        wrapperClassName={wrapperClassName}
+        openAt={openAt}
+        onSignedUrl={onGallerySignedUrl}
+      />
+      {lightbox}
+    </>
+  );
+}
+
+function PostMediaCarousel({
+  images,
+  supabase,
+  imgClass,
+  wrapperClassName,
+  openAt,
+  onSignedUrl,
+}: {
+  images: NormalizedPostImage[];
+  supabase: SupabaseClient | null;
+  imgClass: string;
+  wrapperClassName: string;
+  openAt: (i: number) => void;
+  onSignedUrl: (path: string, url: string) => void;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(0);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el || el.clientWidth === 0) return;
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    setActive((prev) => (prev === i ? prev : Math.min(Math.max(i, 0), images.length - 1)));
+  }, [images.length]);
+
+  const goTo = useCallback((i: number) => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    el.scrollTo({ left: i * el.clientWidth, behavior: "smooth" });
+  }, []);
+
+  return (
+    <div className={`relative ${wrapperClassName}`}>
+      <div
+        ref={scrollerRef}
+        onScroll={handleScroll}
+        role="group"
+        aria-roledescription="carousel"
+        aria-label={`Image gallery, ${images.length} images`}
+        className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain rounded-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {images.map((im, i) => (
+          <div key={`${im.storagePath ?? ""}-${im.src ?? ""}-${i}`} className="w-full shrink-0 snap-center">
             <button
-              key={`${im.storagePath ?? ""}-${im.src ?? ""}-${i}`}
               type="button"
-              className={`block min-w-0 cursor-zoom-in overflow-hidden rounded-xl border-0 bg-transparent p-0 text-left ${focusRing()}`}
+              className={`block w-full min-w-0 cursor-zoom-in border-0 bg-transparent p-0 text-left ${focusRing()}`}
               onClick={() => openAt(i)}
-              aria-label={`View image ${i + 1} fullscreen`}
+              aria-label={`View image ${i + 1} of ${images.length} fullscreen`}
             >
               <PostMediaImage
                 supabase={supabase}
@@ -102,102 +154,26 @@ export default function PostMediaGallery({
                 legacyUrl={im.src}
                 alt={im.alt}
                 className={imgClass}
-                onSignedUrl={onGallerySignedUrl}
+                onSignedUrl={onSignedUrl}
               />
             </button>
-          ))}
-        </div>
-        {lightbox}
-      </>
-    );
-  }
-
-  if (images.length === 3) {
-    return (
-      <>
-        <div className={`grid grid-cols-2 grid-rows-2 gap-1 overflow-hidden rounded-xl ${wrapperClassName}`}>
-          <button
-            type="button"
-            className={`row-span-2 flex min-h-[10rem] min-w-0 cursor-zoom-in items-center justify-center border-0 bg-bg-secondary p-0 ${focusRing()}`}
-            onClick={() => openAt(0)}
-            aria-label="View image 1 fullscreen"
-          >
-            <PostMediaImage
-              supabase={supabase}
-              storagePath={images[0].storagePath}
-              legacyUrl={images[0].src}
-              alt={images[0].alt}
-              className={`${imgClass} max-h-none`}
-              onSignedUrl={onGallerySignedUrl}
-            />
-          </button>
-          <button
-            type="button"
-            className={`flex min-h-0 min-w-0 cursor-zoom-in items-center justify-center border-0 bg-bg-secondary p-0 ${focusRing()}`}
-            onClick={() => openAt(1)}
-            aria-label="View image 2 fullscreen"
-          >
-            <PostMediaImage
-              supabase={supabase}
-              storagePath={images[1].storagePath}
-              legacyUrl={images[1].src}
-              alt={images[1].alt}
-              className={`${imgClass} max-h-[calc(35vh-0.25rem)]`}
-              onSignedUrl={onGallerySignedUrl}
-            />
-          </button>
-          <button
-            type="button"
-            className={`flex min-h-0 min-w-0 cursor-zoom-in items-center justify-center border-0 bg-bg-secondary p-0 ${focusRing()}`}
-            onClick={() => openAt(2)}
-            aria-label="View image 3 fullscreen"
-          >
-            <PostMediaImage
-              supabase={supabase}
-              storagePath={images[2].storagePath}
-              legacyUrl={images[2].src}
-              alt={images[2].alt}
-              className={`${imgClass} max-h-[calc(35vh-0.25rem)]`}
-              onSignedUrl={onGallerySignedUrl}
-            />
-          </button>
-        </div>
-        {lightbox}
-      </>
-    );
-  }
-
-  const rest = images.length - 4;
-  return (
-    <>
-      <div className={`grid grid-cols-2 gap-1 overflow-hidden rounded-xl ${wrapperClassName}`}>
-        {images.slice(0, 4).map((im, i) => (
-          <button
-            key={`${im.storagePath ?? ""}-${im.src ?? ""}-${i}`}
-            type="button"
-            className={`relative flex min-h-[8rem] min-w-0 cursor-zoom-in items-center justify-center border-0 bg-bg-secondary p-0 ${focusRing()}`}
-            onClick={() => openAt(i)}
-            aria-label={
-              i === 3 && rest > 0 ? `View image ${i + 1}, ${rest} more in fullscreen` : `View image ${i + 1} fullscreen`
-            }
-          >
-            <PostMediaImage
-              supabase={supabase}
-              storagePath={im.storagePath}
-              legacyUrl={im.src}
-              alt={im.alt}
-              className="h-full w-full max-h-[min(35vh,12rem)] object-contain"
-              onSignedUrl={onGallerySignedUrl}
-            />
-            {i === 3 && rest > 0 ? (
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/55 text-xl font-semibold text-white">
-                +{rest}
-              </span>
-            ) : null}
-          </button>
+          </div>
         ))}
       </div>
-      {lightbox}
-    </>
+      <div className="mt-2 flex items-center justify-center gap-1.5">
+        {images.map((im, i) => (
+          <button
+            key={`dot-${im.storagePath ?? ""}-${im.src ?? ""}-${i}`}
+            type="button"
+            onClick={() => goTo(i)}
+            aria-label={`Go to image ${i + 1} of ${images.length}`}
+            aria-current={i === active ? "true" : undefined}
+            className={`h-1.5 w-1.5 rounded-full transition-colors ${
+              i === active ? "bg-text" : "bg-text-muted/40 hover:bg-text-muted/70"
+            } ${focusRing()}`}
+          />
+        ))}
+      </div>
+    </div>
   );
 }
