@@ -9,18 +9,18 @@
  * - **Note comments:** default path reads `post_note_comments` filtered by **`thread_root_post_id`** only.
  * - Totals helpers (`fetchPostNotesTotalCount`) follow the same root for like/reblog RPCs and thread-root comment counts.
  *
- * ## Prototype anchor comments (development only)
+ * ## Anchor-scoped note comments (Phase 1 flag + legacy dev prototype)
  *
- * When callers opt into `prototypeAnchorScopedComments` plus `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`
- * **and** a non-empty `notesAnchorPostId`, **only the comment list / comment count paths** may call migration **035**
- * anchor RPCs (`post_note_comments_list_for_anchor`, `post_note_comment_counts_by_anchor`).
- * **Likes and reblogs stay thread-root.** This is intentionally narrow so production behavior cannot drift silently.
+ * When {@link wantsAnchorScopedNoteComments} is true (`NEXT_PUBLIC_NOTES_COMMENT_SCOPE=anchor` + anchor id, or the
+ * legacy dev prototype triple-gate), **only comment list / comment count** use migration **035** anchor RPCs.
+ * **Likes and reblogs stay thread-root.**
  *
  * ## Missing migration 035 RPCs
  *
  * If PostgREST reports the anchor RPC missing (`PGRST202` / “unknown function”), we **fall back** to the same
  * thread-root comment SELECT / head count once per RPC name (dev `console.info`), preserving shipped behavior.
  */
+import { wantsAnchorScopedNoteComments } from "@/lib/notes-comment-scope";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PostNote } from "@/types/post-note";
 
@@ -74,7 +74,7 @@ type CommentNoteRow = {
 // ---------------------------------------------------------------------------
 //
 // Keep **likes + reblogs on thread root** in all environments. **Optional anchor scope applies only to
-// comment reads** when the dev prototype is enabled; otherwise every branch below uses `threadRootNotesKey`.
+// comment reads** when `wantsAnchorScopedNoteComments` is true; otherwise every branch uses `threadRootNotesKey`.
 
 /** Normalized thread-root id for like/reblog queries and the default comment path (shipped contract). */
 function notesThreadRootQueryKey(raw: string | undefined): string {
@@ -107,19 +107,18 @@ function num(v: number | string | undefined): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Dev + `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1` + caller opt-in + anchor id (production never true). */
-function wantsPrototypeAnchorComments(params: FetchPostNotesParams): boolean {
-  if (process.env.NODE_ENV !== "development") return false;
-  if (process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE !== "1") return false;
-  if (!params.prototypeAnchorScopedComments) return false;
-  return (params.notesAnchorPostId?.trim() ?? "").length > 0;
+function wantsAnchorCommentsForFetch(params: FetchPostNotesParams): boolean {
+  return wantsAnchorScopedNoteComments({
+    notesAnchorPostId: params.notesAnchorPostId,
+    prototypeAnchorScopedComments: params.prototypeAnchorScopedComments,
+  });
 }
 
-function wantsPrototypeAnchorCommentsForTotals(options: FetchPostNotesTotalCountOptions | undefined): boolean {
-  if (process.env.NODE_ENV !== "development") return false;
-  if (process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE !== "1") return false;
-  if (!options?.prototypeAnchorScopedComments) return false;
-  return (options.notesAnchorPostId?.trim() ?? "").length > 0;
+function wantsAnchorCommentsForTotals(options: FetchPostNotesTotalCountOptions | undefined): boolean {
+  return wantsAnchorScopedNoteComments({
+    notesAnchorPostId: options?.notesAnchorPostId,
+    prototypeAnchorScopedComments: options?.prototypeAnchorScopedComments,
+  });
 }
 
 function isMissingPostNoteCommentsListForAnchorRpc(err: { code?: string; message?: string }): boolean {
@@ -197,7 +196,7 @@ async function fetchCommentRowsForNotesModal(
     .order("created_at", { ascending: false })
     .limit(limit);
 
-  if (!wantsPrototypeAnchorComments(params)) {
+  if (!wantsAnchorCommentsForFetch(params)) {
     const res = await threadSelect;
     return {
       data: (res.data ?? []) as CommentNoteRow[],
@@ -277,8 +276,8 @@ export type FetchPostNotesParams = {
    */
   notesAnchorPostId?: string | null;
   /**
-   * **Dev-only:** when true with non-empty `notesAnchorPostId` and `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`,
-   * comment list/count use migration **035** anchor RPCs; likes/reblogs stay thread-root.
+   * Legacy dev opt-in for anchor comment reads when `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1`.
+   * Prefer `NEXT_PUBLIC_NOTES_COMMENT_SCOPE=anchor` for production-capable anchor reads.
    */
   prototypeAnchorScopedComments?: boolean;
 };
@@ -353,7 +352,7 @@ function assembleMergedPostNotes(
 
 /**
  * Combined reverse-chronological notes (likes on the root + reblog rows + flat note comments).
- * **Default (shipped):** thread-root comment query. **Dev opt-in:** anchor-scoped comments only; likes/reblogs unchanged.
+ * **Default (shipped):** thread-root comment query. **Anchor scope:** anchor-scoped comments only; likes/reblogs unchanged.
  */
 export async function fetchPostNotes(
   supabase: SupabaseClient,
@@ -455,7 +454,7 @@ async function resolveCommentCountForTotals(
       .select("id", { count: "exact", head: true })
       .eq("thread_root_post_id", threadRootNotesKey);
 
-  if (!wantsPrototypeAnchorCommentsForTotals(options)) {
+  if (!wantsAnchorCommentsForTotals(options)) {
     const res = await threadHead();
     return {
       comment_count: res.count ?? 0,
@@ -506,7 +505,7 @@ async function resolveCommentCountForTotals(
 
 /**
  * Thread-level total “notes” count: likes on the root + descendant reblog rows + note comments.
- * **Default:** thread-root comment head count. **Dev opt-in:** anchor comment count only (likes/reblogs unchanged).
+ * **Default:** thread-root comment head count. **Anchor scope:** anchor comment count only (likes/reblogs unchanged).
  */
 export async function fetchPostNotesTotalCount(
   supabase: SupabaseClient,

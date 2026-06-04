@@ -11,6 +11,7 @@ import {
   validateUserWrittenContent,
 } from "@/lib/post-content-guard";
 import { getProfileLinkSlug } from "@/lib/username";
+import { wantsAnchorScopedNoteComments } from "@/lib/notes-comment-scope";
 import {
   fetchPostNotes,
   fetchPostNotesTotalCount,
@@ -30,8 +31,8 @@ const NOTE_COMMENT_MAX_LEN = 500;
 // ---------------------------------------------------------------------------
 //
 // **Shipped default reads:** thread-root likes/reblogs/comments (`fetchPostNotes` / `fetchPostNotesTotalCount`).
-// **Dev hybrid (opt-in):** `NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE=1` + prop `prototypeAnchorScopedNotesComments`
-// — comment list + comment total use anchor RPCs; likes/reblogs stay thread-root. Diagnostic only.
+// **Phase 1 anchor scope:** `NEXT_PUBLIC_NOTES_COMMENT_SCOPE=anchor` — comment list + comment total use anchor RPCs;
+// likes/reblogs stay thread-root. Legacy dev prototype env remains compatible.
 // **Inserts:** `thread_root_post_id` always; `note_anchor_post_id` dual-written when `notesAnchorPostId` is set
 // and migration 035 is applied (otherwise insert retries without the anchor column).
 
@@ -80,7 +81,12 @@ type Props = {
    * **comment** reads only (likes/reblogs unchanged). No production effect.
    */
   prototypeAnchorScopedNotesComments?: boolean;
-  /** Thread-scoped: applied to the PostCard Notes badge (+1 / -1) without refetching the feed. */
+  /**
+   * Applied to the PostCard Notes badge comment slice (+1 / -1) without refetching the feed.
+   * Matches displayed `note_comment_count` (thread-root by default; anchor when scope flag is on).
+   */
+  onNoteCommentCountDelta?: (delta: number) => void;
+  /** @deprecated Prefer `onNoteCommentCountDelta`. */
   onThreadNoteCountDelta?: (delta: number) => void;
   /**
    * When true for an open session, focuses the “Add a short note” textarea after the initial notes load
@@ -119,9 +125,17 @@ function groupKey(note: PostNote): "activity" | "comment" {
   return "activity";
 }
 
-function groupHeading(key: "activity" | "comment"): string {
+function groupHeading(key: "activity" | "comment", anchorScopedComments: boolean): string {
   if (key === "activity") return "Likes & reblogs";
-  return "Notes & replies";
+  return anchorScopedComments ? "Replies on this post" : "Notes & replies";
+}
+
+/** Breakdown + list labels: anchor mode scopes only the reply slice. */
+function replyCountLabel(count: number, anchorScopedComments: boolean): string {
+  if (anchorScopedComments) {
+    return count === 1 ? "reply on this post" : "replies on this post";
+  }
+  return count === 1 ? "reply" : "replies";
 }
 
 function devCommentReadSourceLabel(s: NotesModalDevCommentReadSource): string {
@@ -154,10 +168,16 @@ export default function PostNotesModal({
   threadRootPostId,
   notesAnchorPostId,
   prototypeAnchorScopedNotesComments,
+  onNoteCommentCountDelta,
   onThreadNoteCountDelta,
   focusComposerOnOpen = false,
   showComposer = true,
 }: Props) {
+  const applyNoteCommentCountDelta = onNoteCommentCountDelta ?? onThreadNoteCountDelta;
+  const anchorScopedNoteComments = wantsAnchorScopedNoteComments({
+    notesAnchorPostId,
+    prototypeAnchorScopedComments: prototypeAnchorScopedNotesComments,
+  });
   const { runProtectedAction } = useActionGuard();
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [loading, setLoading] = useState(false);
@@ -221,11 +241,11 @@ export default function PostNotesModal({
         threadRootPostId: notesThreadRootKey,
         limit: NOTES_FETCH_LIMIT,
         notesAnchorPostId: notesAnchorPostId ?? undefined,
-        prototypeAnchorScopedComments: Boolean(prototypeAnchorScopedNotesComments),
+        prototypeAnchorScopedComments: anchorScopedNoteComments,
       });
       const totalsPromise = fetchPostNotesTotalCount(supabase, notesThreadRootKey, {
         notesAnchorPostId: notesAnchorPostId ?? undefined,
-        prototypeAnchorScopedComments: Boolean(prototypeAnchorScopedNotesComments),
+        prototypeAnchorScopedComments: anchorScopedNoteComments,
       });
       const followsPromise =
         currentUserId && currentUserId.trim().length > 0
@@ -266,8 +286,7 @@ export default function PostNotesModal({
         });
         const devRoot = totalsRes.devThreadRootCommentCountForCompare;
         const showSubtotalCompare =
-          process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1" &&
-          prototypeAnchorScopedNotesComments &&
+          anchorScopedNoteComments &&
           totalsRes.devCommentCountSource === "anchor_rpc" &&
           typeof devRoot === "number" &&
           devRoot !== totalsRes.comment_count;
@@ -285,7 +304,7 @@ export default function PostNotesModal({
       }
       if (!silent) setLoading(false);
     },
-    [supabase, threadRootPostId, currentUserId, notesAnchorPostId, prototypeAnchorScopedNotesComments],
+    [supabase, threadRootPostId, currentUserId, notesAnchorPostId, anchorScopedNoteComments],
   );
 
   useEffect(() => {
@@ -433,7 +452,7 @@ export default function PostNotesModal({
           await alertIfLikelyRateOrGuardFailure(supabase, insErr, { kind: "note_comment" });
           return;
         }
-        onThreadNoteCountDelta?.(1);
+        applyNoteCommentCountDelta?.(1);
         recordSuccessfulUserWrittenPost(normalizePostBodyForDedup(trimmed));
         setComposerText("");
         await loadNotes({ silent: true });
@@ -450,7 +469,7 @@ export default function PostNotesModal({
     composerText,
     runProtectedAction,
     loadNotes,
-    onThreadNoteCountDelta,
+    applyNoteCommentCountDelta,
   ]);
 
   const handleDeleteOwnComment = useCallback(
@@ -467,14 +486,14 @@ export default function PostNotesModal({
             setDeleteError(delErr.message?.trim() ? delErr.message : "Could not remove that note.");
             return;
           }
-          onThreadNoteCountDelta?.(-1);
+          applyNoteCommentCountDelta?.(-1);
           await loadNotes({ silent: true });
         });
       } finally {
         setDeletingCommentId(null);
       }
     },
-    [supabase, currentUserId, runProtectedAction, loadNotes, onThreadNoteCountDelta],
+    [supabase, currentUserId, runProtectedAction, loadNotes, applyNoteCommentCountDelta],
   );
 
   useEffect(() => {
@@ -491,12 +510,12 @@ export default function PostNotesModal({
     let prev: "activity" | "comment" | null = null;
     for (const note of notes) {
       const k = groupKey(note);
-      const heading = prev === null || k !== prev ? groupHeading(k) : null;
+      const heading = prev === null || k !== prev ? groupHeading(k, anchorScopedNoteComments) : null;
       blocks.push({ heading, note });
       prev = k;
     }
     return blocks;
-  }, [notes]);
+  }, [notes, anchorScopedNoteComments]);
 
   if (!open) return null;
 
@@ -513,7 +532,7 @@ export default function PostNotesModal({
     likeCount !== null && reblogCount !== null && commentCount !== null ? (
       <p className="mt-0.5 text-meta text-text-muted">
         {likeCount} {likeCount === 1 ? "like" : "likes"} · {reblogCount} {reblogCount === 1 ? "reblog" : "reblogs"} ·{" "}
-        {commentCount} {commentCount === 1 ? "reply" : "replies"}
+        {commentCount} {replyCountLabel(commentCount, anchorScopedNoteComments)}
       </p>
     ) : null;
 
@@ -533,16 +552,15 @@ export default function PostNotesModal({
           Notes
         </h2>
         <p className="mb-3 text-meta leading-snug text-text-muted">
-          Likes, reblogs, and short replies on this thread
+          {anchorScopedNoteComments
+            ? "Likes and reblogs on the full thread; short replies on this post"
+            : "Likes, reblogs, and short replies on this thread"}
         </p>
 
         <div className="mb-3 rounded-card border border-border/60 bg-bg-secondary/25 px-3 py-2.5 dark:bg-bg-secondary/35">
           {summaryHeadline}
           {breakdown}
-          {process.env.NODE_ENV === "development" &&
-          process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1" &&
-          prototypeAnchorScopedNotesComments &&
-          devCommentSubtotalCompare ? (
+          {process.env.NODE_ENV === "development" && anchorScopedNoteComments && devCommentSubtotalCompare ? (
             <p
               className="mt-1 text-[0.65rem] font-mono leading-tight text-text-muted/75"
               title="Diagnostic: thread-root vs anchor note-comment subtotals (development only; not shipped UI)"
@@ -552,10 +570,7 @@ export default function PostNotesModal({
           ) : null}
         </div>
 
-        {process.env.NODE_ENV === "development" &&
-        process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1" &&
-        prototypeAnchorScopedNotesComments &&
-        devCommentReadDiag ? (
+        {process.env.NODE_ENV === "development" && anchorScopedNoteComments && devCommentReadDiag ? (
           <p
             className="mb-2 text-[0.65rem] leading-tight font-mono text-text-muted/80"
             title="Diagnostic: note-comment list vs count query path (development only)"
@@ -579,8 +594,14 @@ export default function PostNotesModal({
 
         {showEmpty ? (
           <div className="mb-4 rounded-card border border-dashed border-border/70 bg-bg-secondary/15 px-4 py-6 text-center dark:bg-bg-secondary/25">
-            <p className="text-sm font-medium text-text">Quiet thread</p>
-            <p className="mt-1.5 text-meta leading-relaxed text-text-muted">No Likes or Reblogs yet</p>
+            <p className="text-sm font-medium text-text">
+              {anchorScopedNoteComments ? "No activity yet" : "Quiet thread"}
+            </p>
+            <p className="mt-1.5 text-meta leading-relaxed text-text-muted">
+              {anchorScopedNoteComments
+                ? "No likes, reblogs, or replies on this post yet"
+                : "No Likes or Reblogs yet"}
+            </p>
           </div>
         ) : null}
 
@@ -765,7 +786,9 @@ export default function PostNotesModal({
               </>
             ) : (
               <p className="text-meta leading-relaxed text-text-muted">
-                Sign in to leave a short note on this thread. Everyone who can see the post can read notes here.
+                Sign in to leave a short note{" "}
+                {anchorScopedNoteComments ? "on this post" : "on this thread"}. Everyone who can see the post can
+                read notes here.
               </p>
             )}
           </div>

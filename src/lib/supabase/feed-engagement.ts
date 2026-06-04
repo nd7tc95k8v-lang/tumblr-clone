@@ -20,6 +20,7 @@
  * fields stable. **`engagementKeyForBatchAndMerge` must continue to resolve to thread root until that rollout.**
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isNotesCommentScopeAnchor } from "@/lib/notes-comment-scope";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import type { FeedPost } from "@/types/post";
 import { fetchReadonlyAnchorNoteCommentCountProbe } from "@/lib/supabase/readonly-anchor-note-comment-count-probe";
@@ -59,7 +60,6 @@ function engagementKeyThreadRoot(p: FeedPost): string {
  * `card_engagement_owner_post_id` (from `noteOwnerPostIdForCard` at hydrate).
  * **Not** used for RPC batching, merge, or `liked_by_me` in the shipped code path.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- switch target for per-card engagement; see engagementKeyForBatchAndMerge
 function engagementKeyCardOwner(p: FeedPost): string {
   return p.card_engagement_owner_post_id;
 }
@@ -86,8 +86,8 @@ function distinctNonEmptyIds(posts: FeedPost[], keyFn: (p: FeedPost) => string):
 }
 
 /**
- * Merge **engagement-only** fields (`like_count`, `reblog_count`, `note_comment_count`, `liked_by_me`)
- * from RPC maps using the active engagement batch key (shipped: thread root).
+ * Merge **engagement-only** fields (`like_count`, `reblog_count`, `note_comment_count`, `liked_by_me`).
+ * Likes/reblogs/`liked_by_me` use the thread-root batch key; `note_comment_count` may use anchor scope (Phase 1).
  * Does **not** set `original_post_id` — that is thread-structure data; see {@link applyThreadRootOriginalPostId}.
  */
 function mergeEngagementCountsOntoPost(
@@ -95,14 +95,22 @@ function mergeEngagementCountsOntoPost(
   engagementLookupKey: string,
   likeMap: Map<string, number>,
   reblogMap: Map<string, number>,
-  noteCommentMap: Map<string, number>,
+  threadRootNoteCommentMap: Map<string, number>,
+  anchorNoteCommentMap: ReadonlyMap<string, number> | null,
   likedBatchKeys: Set<string>,
 ): FeedPost {
+  const cardOwnerKey = engagementKeyCardOwner(p).trim();
+  // Anchor map is non-null only after a successful RPC batch; missing anchor row → 0, not thread-root.
+  const note_comment_count =
+    anchorNoteCommentMap !== null && cardOwnerKey.length > 0
+      ? (anchorNoteCommentMap.get(cardOwnerKey) ?? 0)
+      : (threadRootNoteCommentMap.get(engagementLookupKey) ?? 0);
+
   return {
     ...p,
     like_count: likeMap.get(engagementLookupKey) ?? 0,
     reblog_count: reblogMap.get(engagementLookupKey) ?? 0,
-    note_comment_count: noteCommentMap.get(engagementLookupKey) ?? 0,
+    note_comment_count,
     liked_by_me: likedBatchKeys.has(engagementLookupKey),
   };
 }
@@ -119,8 +127,8 @@ function applyThreadRootOriginalPostId(row: FeedPost): FeedPost {
 
 const DEV_ANCHOR_NOTE_MISMATCH_LOG_CAP = 8;
 
-/** Avoid spamming dev consoles when migration 035 is not applied. */
-let devLoggedAnchorNoteCommentProbeUnsupported = false;
+/** Avoid spamming consoles when migration 035 is not applied. */
+let loggedAnchorNoteCommentProbeUnsupported = false;
 
 /**
  * Dev-only: attaches **`anchor_note_comment_count`** when the anchor probe succeeds; logs thread vs anchor
@@ -132,8 +140,8 @@ async function devAugmentAnchorNoteCommentCountsAndLog(
 ): Promise<FeedPost[]> {
   const probe = await fetchReadonlyAnchorNoteCommentCountProbe(supabase, mergedPosts);
   if (probe.status === "unsupported") {
-    if (!devLoggedAnchorNoteCommentProbeUnsupported) {
-      devLoggedAnchorNoteCommentProbeUnsupported = true;
+    if (!loggedAnchorNoteCommentProbeUnsupported) {
+      loggedAnchorNoteCommentProbeUnsupported = true;
       console.info("[feed-engagement] anchor note-comment probe unsupported (migration 035 / RPC); skipping diff.");
     }
     return mergedPosts;
@@ -180,7 +188,7 @@ async function devAugmentAnchorNoteCommentCountsAndLog(
  * - `post_like_counts` — counts `likes` where `post_id` is each root.
  * - `post_ids_liked_by_auth_user` — which roots the viewer liked.
  * - `post_reblog_counts_by_root` — descendant posts per root.
- * - `post_note_comment_counts_by_root` — note comments per root.
+ * - `post_note_comment_counts_by_root` — note comments per root (Phase 1 anchor scope overlays per-card counts).
  *
  * **Future:** switch {@link engagementKeyForBatchAndMerge} to use {@link engagementKeyCardOwner}
  * (and adjust RPCs) for per-reblog engagement; keep {@link applyThreadRootOriginalPostId} unless
@@ -227,9 +235,24 @@ export async function attachFeedPostEngagement(
     reblogMap.set(row.root_id, num(row.reblog_count));
   }
 
-  const noteCommentMap = new Map<string, number>();
+  const threadRootNoteCommentMap = new Map<string, number>();
   for (const row of (noteCommentsRes.data ?? []) as NoteCommentCountRow[]) {
-    noteCommentMap.set(row.root_id, num(row.comment_count));
+    threadRootNoteCommentMap.set(row.root_id, num(row.comment_count));
+  }
+
+  let anchorNoteCommentMap: ReadonlyMap<string, number> | null = null;
+  if (isNotesCommentScopeAnchor()) {
+    const probe = await fetchReadonlyAnchorNoteCommentCountProbe(supabase, posts);
+    if (probe.status === "ok") {
+      anchorNoteCommentMap = probe.commentCountByAnchorPostId;
+    } else if (probe.status === "unsupported") {
+      if (!loggedAnchorNoteCommentProbeUnsupported) {
+        loggedAnchorNoteCommentProbeUnsupported = true;
+        console.info(
+          "[feed-engagement] NEXT_PUBLIC_NOTES_COMMENT_SCOPE=anchor but post_note_comment_counts_by_anchor unavailable; using thread-root comment counts.",
+        );
+      }
+    }
   }
 
   if (process.env.NODE_ENV === "development" && batchIds.length > 0) {
@@ -267,13 +290,14 @@ export async function attachFeedPostEngagement(
       engagementLookupKey,
       likeMap,
       reblogMap,
-      noteCommentMap,
+      threadRootNoteCommentMap,
+      anchorNoteCommentMap,
       likedBatchKeys,
     );
     return applyThreadRootOriginalPostId(withEngagement);
   });
 
-  if (process.env.NODE_ENV === "development" && merged.length > 0) {
+  if (!isNotesCommentScopeAnchor() && process.env.NODE_ENV === "development" && merged.length > 0) {
     try {
       return await devAugmentAnchorNoteCommentCountsAndLog(supabase, merged);
     } catch (e) {

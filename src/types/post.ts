@@ -93,15 +93,15 @@ export type FeedPost = {
   /** Descendant reblogs for the chain root (`original_post_id`). */
   reblog_count: number;
   /**
-   * Count of flat **thread-root** note comments (`post_note_comments` where `thread_root_post_id` is the
-   * chain root). Same value for every row in the thread under shipped hydration; authoritative for UI.
+   * Flat note comment count for this card. **Default (shipped):** thread-root (`thread_root_post_id` =
+   * chain root) — same value for every row in the thread. **Phase 1 (`NEXT_PUBLIC_NOTES_COMMENT_SCOPE=anchor`):**
+   * per-authored-layer count via `note_anchor_post_id` / `card_engagement_owner_post_id` when RPCs exist;
+   * falls back to thread-root. Likes/reblogs on the card stay thread-root.
    */
   note_comment_count: number;
   /**
-   * **Dev-only / preparatory / prototype:** anchor-scoped flat note comment total when migration **035**
-   * anchor RPCs are available (`note_anchor_post_id` / `post_note_comment_counts_by_anchor`), attached in
-   * development via the read-only probe in `feed-engagement`. Omitted when unsupported or outside dev.
-   * **Not** used by shipped production UI — `note_comment_count` remains thread-root.
+   * **Dev diagnostic only** when comment scope is still thread-root: anchor-scoped total from the read-only
+   * probe in `feed-engagement` for comparing thread vs anchor. Omitted when anchor scope is active or probe fails.
    */
   anchor_note_comment_count?: number | null;
   /** True when the viewer liked the thread root (`post_ids_liked_by_auth_user` on root ids). */

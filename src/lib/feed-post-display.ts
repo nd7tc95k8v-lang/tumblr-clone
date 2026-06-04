@@ -554,8 +554,8 @@ export function postCardHeaderProfile(post: FeedPost): {
  * - Plain reblog → `resolvePlainReblogDisplay`: `quoted` → that node’s id; `flat` → leaf id;
  *   unresolved chain → `post.id`.
  *
- * **Not wired** to shipped likes, note comment counts, Notes modal queries, or RPC batch keys — those remain
- * thread-root until an explicit migration switches `engagementKeyForBatchAndMerge` and related product rules.
+ * **Phase 1:** `NEXT_PUBLIC_NOTES_COMMENT_SCOPE=anchor` scopes **note comment counts** (feed + modal) to this id;
+ * likes/reblogs and `engagementKeyForBatchAndMerge` stay thread-root. Full per-card likes still require a later switch.
  */
 export function noteOwnerPostIdForCard(post: FeedPost): string {
   if (!post.reblog_of?.trim()) {

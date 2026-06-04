@@ -1017,7 +1017,7 @@ export default function PostCard({
 
   const postTime = formatRelativePostTime(post.created_at);
   const effectiveNoteCommentCount = Math.max(0, post.note_comment_count + noteCommentAdjust);
-  const handleThreadNoteCountDelta = useCallback((delta: number) => {
+  const handleNoteCommentCountDelta = useCallback((delta: number) => {
     setNoteCommentAdjust((prev) => prev + delta);
   }, []);
   const notesTriggerTotal =
@@ -1515,7 +1515,7 @@ export default function PostCard({
           </div>
         </div>
       </div>
-      {/* Shipped Notes reads: thread root. Inserts also dual-write `note_anchor_post_id` when DB supports it. */}
+      {/* Notes: thread-root likes/reblogs; comment scope via NEXT_PUBLIC_NOTES_COMMENT_SCOPE (default thread). */}
       <PostNotesModal
         open={notesModalOpen}
         onClose={() => {
@@ -1533,7 +1533,7 @@ export default function PostCard({
           process.env.NODE_ENV === "development" &&
           process.env.NEXT_PUBLIC_NOTES_ANCHOR_COMMENTS_PROTOTYPE === "1"
         }
-        onThreadNoteCountDelta={handleThreadNoteCountDelta}
+        onNoteCommentCountDelta={handleNoteCommentCountDelta}
       />
       <ReblogModal
         post={reblogModalPost}
