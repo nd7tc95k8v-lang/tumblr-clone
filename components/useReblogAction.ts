@@ -2,12 +2,18 @@
 
 import { useCallback } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
+import { resolveLikelyRateOrGuardFailureMessage } from "@/lib/action-guard/resolve-rate-or-guard-failure";
 import { buildOptimisticReblogFeedPost, reblogInsertFields } from "@/lib/reblog";
 import type { FeedPost, PostAuthorEmbed } from "@/types/post";
 import { useActionGuard } from "./ActionGuardProvider";
 
 const MAX_POST_IMAGES = 10;
+
+export const REBLOG_AUTH_REQUIRED_MESSAGE = "You must be logged in to reblog.";
+
+export type ReblogActionInvokeOptions = {
+  onError?: (message: string) => void;
+};
 
 export type UseReblogActionOptions = {
   /** Runs after a successful insert (e.g. reload the feed). */
@@ -19,16 +25,11 @@ export type UseReblogActionOptions = {
   onOptimisticFeedPost?: (post: FeedPost) => void | Promise<void>;
   /** Current user’s author embed for the optimistic row header. */
   getViewerAuthor?: () => PostAuthorEmbed | null;
+  /** Fallback when callers omit per-invoke {@link ReblogActionInvokeOptions.onError}. */
+  onError?: (message: string) => void;
 };
 
-/**
- * Reblog flow: auth check → guarded insert via {@link reblogInsertFields} → optional image uploads → optional reload.
- * Returns whether the reblog completed (false if unauthenticated, blocked, or errored).
- */
-export function useReblogAction(
-  supabase: SupabaseClient | null,
-  { onSuccess, onOptimisticFeedPost, getViewerAuthor }: UseReblogActionOptions,
-): (
+export type ReblogActionHandler = (
   original: FeedPost,
   commentary?: string | null,
   tags?: string[],
@@ -36,24 +37,40 @@ export function useReblogAction(
   editorMarksMature?: boolean,
   /** Editor reblog only; ignored when `commentary === null` (Quick). */
   images?: File[],
-) => Promise<boolean> {
+  invokeOpts?: ReblogActionInvokeOptions,
+) => Promise<boolean>;
+
+/**
+ * Reblog flow: auth check → guarded insert via {@link reblogInsertFields} → optional image uploads → optional reload.
+ * Returns whether the reblog completed (false if unauthenticated, blocked, or errored).
+ */
+export function useReblogAction(
+  supabase: SupabaseClient | null,
+  { onSuccess, onOptimisticFeedPost, getViewerAuthor, onError }: UseReblogActionOptions,
+): ReblogActionHandler {
   const { runProtectedAction } = useActionGuard();
 
   return useCallback(
     async (
-      original: FeedPost,
-      commentary?: string | null,
-      tags?: string[],
-      editorMarksMature?: boolean,
-      images?: File[],
+      original,
+      commentary,
+      tags,
+      editorMarksMature,
+      images,
+      invokeOpts,
     ) => {
+      const reportError = (message: string) => {
+        const handler = invokeOpts?.onError ?? onError;
+        handler?.(message);
+      };
+
       if (!supabase) return false;
       const {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
       if (userError || !user) {
-        alert("You must be logged in to reblog.");
+        reportError(REBLOG_AUTH_REQUIRED_MESSAGE);
         return false;
       }
 
@@ -87,7 +104,7 @@ export function useReblogAction(
         });
         if (error) {
           console.error(error);
-          await alertIfLikelyRateOrGuardFailure(supabase, error, { kind: "reblog" });
+          reportError(await resolveLikelyRateOrGuardFailureMessage(supabase, error, { kind: "reblog" }));
           return;
         }
 
@@ -161,7 +178,7 @@ export function useReblogAction(
               err instanceof Error && err.message.trim()
                 ? err.message.trim()
                 : "Could not attach photos to this reblog.";
-            alert(msg);
+            reportError(msg);
             return;
           }
         }
@@ -182,6 +199,6 @@ export function useReblogAction(
       });
       return succeeded;
     },
-    [supabase, onSuccess, onOptimisticFeedPost, getViewerAuthor, runProtectedAction],
+    [supabase, onSuccess, onOptimisticFeedPost, getViewerAuthor, onError, runProtectedAction],
   );
 }

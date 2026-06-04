@@ -6,6 +6,7 @@ import {
   normalizeSearchTagList,
   parseSearchTagMatchMode,
 } from "@/lib/supabase/fetch-search-posts";
+import { DEFAULT_FEED_PAGE_SIZE } from "@/lib/supabase/fetch-feed-posts";
 import { fetchSearchUsers, type SearchUserResult } from "@/lib/supabase/fetch-search-users";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 import type { FeedPost } from "@/types/post";
@@ -37,19 +38,25 @@ export default async function SearchPage({ searchParams }: PageProps) {
   let initialLoadError: string | null = null;
   let initialUsers: SearchUserResult[] = [];
 
+  let initialHasMore = false;
+  let initialEffectiveContentSubstring: string | null = null;
+
   if (supabase && hasQuery) {
     const postPromise = fetchSearchPostsWithTwoTokenFallback(supabase, {
       rawQ: q,
       tagsAny: tagsList,
       tagMatchMode,
       viewerUserId: null,
+      limit: DEFAULT_FEED_PAGE_SIZE,
     });
     const userPromise = q.length > 0 ? fetchSearchUsers(supabase, q) : Promise.resolve({ data: [], error: null });
 
-    const [{ data: postsData, error: postsError }, { data: usersData }] = await Promise.all([postPromise, userPromise]);
+    const [postResult, { data: usersData }] = await Promise.all([postPromise, userPromise]);
 
-    initialPosts = postsData ?? [];
-    initialLoadError = postsError?.message ?? null;
+    initialPosts = postResult.data ?? [];
+    initialLoadError = postResult.error?.message ?? null;
+    initialHasMore = postResult.hasMore;
+    initialEffectiveContentSubstring = postResult.effectiveContentSubstring;
     initialUsers = usersData ?? [];
   }
 
@@ -69,6 +76,8 @@ export default async function SearchPage({ searchParams }: PageProps) {
               initialPosts={initialPosts ?? []}
               initialLoadError={initialLoadError}
               initialUsers={initialUsers}
+              initialHasMore={initialHasMore}
+              initialEffectiveContentSubstring={initialEffectiveContentSubstring}
             />
           </Suspense>
         </div>

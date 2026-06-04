@@ -5,7 +5,7 @@ import ProfilePageClient from "../../../../components/ProfilePageClient";
 import type { ProfilePublic } from "@/types/profile";
 import { normalizeRouteUsername } from "@/lib/username";
 import { fetchProfileFollowCounts } from "@/lib/supabase/follow-counts";
-import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { DEFAULT_FEED_PAGE_SIZE, fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 
 type PageProps = {
@@ -97,8 +97,8 @@ export default async function ProfilePage({ params }: PageProps) {
     nsfw_feed_mode: profileRow.nsfw_feed_mode ?? null,
   };
 
-  const [{ data: postsData }, { data: followStats }] = await Promise.all([
-    fetchFeedPosts(supabase, { filterUserIds: [profile.id] }),
+  const [{ data: postsData, hasMore: initialHasMore }, { data: followStats }] = await Promise.all([
+    fetchFeedPosts(supabase, { filterUserIds: [profile.id], limit: DEFAULT_FEED_PAGE_SIZE }),
     fetchProfileFollowCounts(supabase, profile.id),
   ]);
 
@@ -109,6 +109,7 @@ export default async function ProfilePage({ params }: PageProps) {
           <ProfilePageClient
             profile={profile}
             initialPosts={postsData ?? []}
+            initialHasMore={initialHasMore}
             initialFollowStats={followStats}
           />
         </div>

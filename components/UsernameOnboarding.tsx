@@ -229,10 +229,11 @@ export default function UsernameOnboarding({ supabase, userId, onComplete }: Pro
                   }
                   const img = validateImageFile(f);
                   if (!img.ok) {
-                    alert(img.error);
+                    setSaveError(img.error);
                     e.target.value = "";
                     return;
                   }
+                  setSaveError(null);
                   setAvatarFile(f);
                 }}
                 className="text-sm text-text-secondary file:mr-3 file:rounded file:border-0 file:bg-bg-secondary file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-text hover:file:bg-border-soft"

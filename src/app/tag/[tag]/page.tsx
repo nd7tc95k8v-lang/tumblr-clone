@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import TagPageClient from "../../../../components/TagPageClient";
 import { tagFromRouteParam } from "@/lib/tags";
-import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { DEFAULT_FEED_PAGE_SIZE, fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { countPostsWithTag } from "@/lib/supabase/fetch-search-posts";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 
@@ -41,8 +41,8 @@ export default async function TagPage({ params }: PageProps) {
     );
   }
 
-  const [{ data, error }, countRes] = await Promise.all([
-    fetchFeedPosts(supabase, { filterTag: tag }),
+  const [{ data, error, hasMore: initialHasMore }, countRes] = await Promise.all([
+    fetchFeedPosts(supabase, { filterTag: tag, limit: DEFAULT_FEED_PAGE_SIZE }),
     countPostsWithTag(supabase, tag),
   ]);
 
@@ -57,6 +57,7 @@ export default async function TagPage({ params }: PageProps) {
             tag={tag}
             initialPosts={data ?? []}
             initialLoadError={error?.message ?? null}
+            initialHasMore={initialHasMore}
             postCount={postCount}
           />
         </div>

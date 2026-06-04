@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
+import { resolveLikelyRateOrGuardFailureMessage } from "@/lib/action-guard/resolve-rate-or-guard-failure";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
 import { preparePostImageForUpload } from "@/lib/post-image-prep";
 import {
@@ -226,12 +226,7 @@ const PostForm = ({ supabase, onPosted, defaultMarkNsfw = false }: Props) => {
 
         if (insertError) {
           console.error(insertError);
-          const msg =
-            insertError.message?.trim() ||
-            insertError.code ||
-            "Could not create your post.";
-          setFormError(`Post draft failed: ${msg}`);
-          await alertIfLikelyRateOrGuardFailure(supabase, insertError, { kind: "post" });
+          setFormError(await resolveLikelyRateOrGuardFailureMessage(supabase, insertError, { kind: "post" }));
           return;
         }
 

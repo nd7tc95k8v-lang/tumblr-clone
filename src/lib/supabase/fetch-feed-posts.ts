@@ -11,6 +11,17 @@ import { coercePostTags } from "@/lib/tags";
 import type { EmbeddedPostWithAuthor, FeedPost } from "@/types/post";
 import { attachFeedPostEngagement } from "@/lib/supabase/feed-engagement";
 
+/** Newest-first ordering for merged feed rows (`created_at desc`, then `id desc`). */
+export function compareFeedPostsNewestFirst(
+  a: { created_at: string; id: string },
+  b: { created_at: string; id: string },
+): number {
+  const ta = new Date(a.created_at).getTime();
+  const tb = new Date(b.created_at).getTime();
+  if (tb !== ta) return tb - ta;
+  return b.id.localeCompare(a.id);
+}
+
 /** Merge “following” sources: followed-user posts + tag-matched posts, deduped by `id`, newest first. */
 export function mergeFollowingFeedSources(fromFollowedUsers: FeedPost[], fromFollowedTags: FeedPost[]): FeedPost[] {
   const map = new Map<string, FeedPost>();
@@ -22,9 +33,7 @@ export function mergeFollowingFeedSources(fromFollowedUsers: FeedPost[], fromFol
       map.set(p.id, p);
     }
   }
-  return [...map.values()].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
+  return [...map.values()].sort(compareFeedPostsNewestFirst);
 }
 
 /** Feed list: post row + author only (no posts→posts embed). */
@@ -226,6 +235,22 @@ function chainRowToEmbedded(row: ChainPostRow): EmbeddedPostWithAuthor {
   };
 }
 
+/** Keyset cursor for `(created_at desc, id desc)` feed pagination. */
+export type FeedPageCursor = {
+  created_at: string;
+  id: string;
+};
+
+export const DEFAULT_FEED_PAGE_SIZE = 25;
+const MAX_FEED_PAGE_SIZE = 50;
+
+export type FetchFeedPostsResult = {
+  data: FeedPost[] | null;
+  error: { message: string } | null;
+  nextCursor: FeedPageCursor | null;
+  hasMore: boolean;
+};
+
 export type FetchFeedPostsOptions = {
   /**
    * **Following-style feed:** restrict to posts whose `user_id` is in this list (e.g. viewer + accounts they follow).
@@ -245,7 +270,74 @@ export type FetchFeedPostsOptions = {
    * Opt-in only (home / explore / search); omit on profile and tag surfaces.
    */
   excludeNsfwFromFeed?: boolean;
+  /** When set, return at most this many rows plus pagination metadata (`limit + 1` fetched internally). */
+  limit?: number;
+  /** Rows strictly older than this cursor in `(created_at desc, id desc)` order. */
+  cursor?: FeedPageCursor | null;
+  /** Rows strictly newer than this anchor (mutually exclusive with `cursor`). For poll / prepend. */
+  newerThan?: FeedPageCursor | null;
 };
+
+export function resolveFeedPageLimit(limit: number | undefined): number | undefined {
+  if (limit === undefined || limit === null) return undefined;
+  const n = Math.floor(limit);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_FEED_PAGE_SIZE;
+  return Math.min(n, MAX_FEED_PAGE_SIZE);
+}
+
+/** Quote a value for PostgREST `.or()` filter strings (ISO timestamps need quoting). */
+function postgrestFilterLiteral(value: string): string {
+  if (/[,()]/.test(value) || value.includes(":")) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/**
+ * PostgREST `.or()` filter: rows before `cursor` when ordering by `created_at desc, id desc`.
+ * Equivalent to `(created_at < ts) OR (created_at = ts AND id < id)`.
+ */
+export function feedKeysetBeforeCursorFilter(cursor: FeedPageCursor): string {
+  const ts = postgrestFilterLiteral(cursor.created_at);
+  const id = cursor.id;
+  return `created_at.lt.${ts},and(created_at.eq.${ts},id.lt.${id})`;
+}
+
+/**
+ * PostgREST `.or()` filter: rows after `cursor` when ordering by `created_at desc, id desc`
+ * (i.e. strictly newer in feed order — for background poll / prepend).
+ */
+export function feedKeysetAfterCursorFilter(cursor: FeedPageCursor): string {
+  const ts = postgrestFilterLiteral(cursor.created_at);
+  const id = cursor.id;
+  return `created_at.gt.${ts},and(created_at.eq.${ts},id.gt.${id})`;
+}
+
+export function sliceFeedQueryPage<T extends { created_at: string; id: string }>(
+  rows: T[],
+  limit: number,
+): { pageRows: T[]; hasMore: boolean; nextCursor: FeedPageCursor | null } {
+  const hasMore = rows.length > limit;
+  const pageRows = hasMore ? rows.slice(0, limit) : rows;
+  const last = pageRows[pageRows.length - 1];
+  return {
+    pageRows,
+    hasMore,
+    nextCursor: hasMore && last ? { created_at: last.created_at, id: last.id } : null,
+  };
+}
+
+/** Append feed rows without duplicate ids (stable order: existing then incoming). */
+export function appendFeedPostsDedupe(existing: FeedPost[], incoming: FeedPost[]): FeedPost[] {
+  const seen = new Set(existing.map((p) => p.id));
+  const out = [...existing];
+  for (const p of incoming) {
+    if (seen.has(p.id)) continue;
+    seen.add(p.id);
+    out.push(p);
+  }
+  return out;
+}
 
 /**
  * Load feed rows, then merge chain roots as `original_post`.
@@ -254,8 +346,14 @@ export type FetchFeedPostsOptions = {
 export async function fetchFeedPosts(
   supabase: SupabaseClient,
   options: FetchFeedPostsOptions = {},
-): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
-  let query = supabase.from("posts").select(POST_FEED_BASE_SELECT).order("created_at", { ascending: false });
+): Promise<FetchFeedPostsResult> {
+  const pageLimit = resolveFeedPageLimit(options.limit);
+
+  let query = supabase
+    .from("posts")
+    .select(POST_FEED_BASE_SELECT)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
 
   if (options.filterUserIds && options.filterUserIds.length > 0) {
     query = query.in("user_id", options.filterUserIds);
@@ -274,12 +372,45 @@ export async function fetchFeedPosts(
     query = query.eq("is_nsfw", false);
   }
 
-  const { data: rows, error } = await query;
-  if (error) {
-    return { data: null, error };
+  if (pageLimit !== undefined) {
+    query = query.limit(pageLimit + 1);
+    const newerThan = options.newerThan;
+    const cursor = options.cursor;
+    if (newerThan?.created_at?.trim() && newerThan.id?.trim()) {
+      query = query.or(feedKeysetAfterCursorFilter(newerThan));
+    } else if (cursor?.created_at?.trim() && cursor.id?.trim()) {
+      query = query.or(feedKeysetBeforeCursorFilter(cursor));
+    }
   }
 
-  return hydrateFeedPostsFromQueryRows(supabase, rows as FeedQueryRow[], options.viewerUserId ?? null);
+  const { data: rows, error } = await query;
+  if (error) {
+    return { data: null, error, nextCursor: null, hasMore: false };
+  }
+
+  const rawRows = (rows ?? []) as FeedQueryRow[];
+  let rowsToHydrate = rawRows;
+  let nextCursor: FeedPageCursor | null = null;
+  let hasMore = false;
+
+  if (pageLimit !== undefined) {
+    const sliced = sliceFeedQueryPage(rawRows, pageLimit);
+    rowsToHydrate = sliced.pageRows;
+    nextCursor = sliced.nextCursor;
+    hasMore = sliced.hasMore;
+  }
+
+  const hydrated = await hydrateFeedPostsFromQueryRows(
+    supabase,
+    rowsToHydrate,
+    options.viewerUserId ?? null,
+  );
+  return {
+    data: hydrated.data,
+    error: hydrated.error,
+    nextCursor,
+    hasMore,
+  };
 }
 
 /**
@@ -330,23 +461,63 @@ export async function fetchFeedPostsForFollowedTagsOverlap(
   supabase: SupabaseClient,
   normalizedTags: string[],
   viewerUserId: string | null,
-  opts?: { excludeNsfwFromFeed?: boolean },
-): Promise<{ data: FeedPost[] | null; error: { message: string } | null }> {
+  opts?: {
+    excludeNsfwFromFeed?: boolean;
+    limit?: number;
+    cursor?: FeedPageCursor | null;
+    newerThan?: FeedPageCursor | null;
+  },
+): Promise<FetchFeedPostsResult> {
   if (normalizedTags.length === 0) {
-    return { data: [], error: null };
+    return { data: [], error: null, nextCursor: null, hasMore: false };
   }
 
-  let query = supabase.from("posts").select(POST_FEED_BASE_SELECT).order("created_at", { ascending: false });
+  const pageLimit = resolveFeedPageLimit(opts?.limit);
+
+  let query = supabase
+    .from("posts")
+    .select(POST_FEED_BASE_SELECT)
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
   query = query.overlaps("tags", normalizedTags);
 
   if (opts?.excludeNsfwFromFeed) {
     query = query.eq("is_nsfw", false);
   }
 
-  const { data: rows, error } = await query;
-  if (error) {
-    return { data: null, error };
+  if (pageLimit !== undefined) {
+    query = query.limit(pageLimit + 1);
+    const newerThan = opts?.newerThan;
+    const cursor = opts?.cursor;
+    if (newerThan?.created_at?.trim() && newerThan.id?.trim()) {
+      query = query.or(feedKeysetAfterCursorFilter(newerThan));
+    } else if (cursor?.created_at?.trim() && cursor.id?.trim()) {
+      query = query.or(feedKeysetBeforeCursorFilter(cursor));
+    }
   }
 
-  return hydrateFeedPostsFromQueryRows(supabase, rows as FeedQueryRow[], viewerUserId ?? null);
+  const { data: rows, error } = await query;
+  if (error) {
+    return { data: null, error, nextCursor: null, hasMore: false };
+  }
+
+  const rawRows = (rows ?? []) as FeedQueryRow[];
+  let rowsToHydrate = rawRows;
+  let nextCursor: FeedPageCursor | null = null;
+  let hasMore = false;
+
+  if (pageLimit !== undefined) {
+    const sliced = sliceFeedQueryPage(rawRows, pageLimit);
+    rowsToHydrate = sliced.pageRows;
+    nextCursor = sliced.nextCursor;
+    hasMore = sliced.hasMore;
+  }
+
+  const hydrated = await hydrateFeedPostsFromQueryRows(supabase, rowsToHydrate, viewerUserId ?? null);
+  return {
+    data: hydrated.data,
+    error: hydrated.error,
+    nextCursor,
+    hasMore,
+  };
 }

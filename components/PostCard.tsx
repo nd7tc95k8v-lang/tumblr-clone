@@ -36,6 +36,7 @@ import ReblogModal from "./ReblogModal";
 import { DEFAULT_NSFW_FEED_MODE, type NsfwFeedMode } from "@/lib/nsfw-feed-preference";
 import { useActionGuard } from "./ActionGuardProvider";
 import { usePostLikeToggle } from "./usePostLikeToggle";
+import type { ReblogActionHandler } from "./useReblogAction";
 
 const ICON_BOX = "h-4 w-4 shrink-0 transition-[transform,opacity] duration-200 ease-out";
 
@@ -239,14 +240,7 @@ function NsfwFeedContentWarning({ onReveal }: { onReveal: () => void }) {
 type Props = {
   post: FeedPost;
   rebloggingId: string | null;
-  onReblog: (
-    post: FeedPost,
-    commentary?: string | null,
-    tags?: string[],
-    editorMarksMature?: boolean,
-    /** Editor reblog only; omitted on Quick reblog. */
-    images?: File[],
-  ) => boolean | Promise<boolean>;
+  onReblog: ReblogActionHandler;
   /** Default checked state for modal “Mark this reblog mature” when source is SFW. */
   viewerDefaultPostsNsfw?: boolean;
   showReblog?: boolean;
@@ -447,6 +441,7 @@ export default function PostCard({
   const [reblogModalPost, setReblogModalPost] = useState<FeedPost | null>(null);
   const [reblogModalBusy, setReblogModalBusy] = useState(false);
   const [reblogModalError, setReblogModalError] = useState<string | null>(null);
+  const [quickReblogError, setQuickReblogError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [tagsEditOpen, setTagsEditOpen] = useState(false);
@@ -1264,6 +1259,11 @@ export default function PostCard({
             onDismiss={() => setDeleteError(null)}
             className="mt-2.5"
           />
+          <InlineErrorBanner
+            message={quickReblogError}
+            onDismiss={() => setQuickReblogError(null)}
+            className="mt-2.5"
+          />
           <div className="mt-2.5 border-t border-border/45 pt-2.5 sm:mt-3 sm:pt-3">
             <div className="flex min-w-0 items-center gap-3">
               <button
@@ -1338,6 +1338,7 @@ export default function PostCard({
                     disabled={rebloggingId !== null || reblogModalBusy}
                     onClick={() => {
                       setReblogModalError(null);
+                      setQuickReblogError(null);
                       setReblogModalPost(post);
                     }}
                     className={`${REBLOG_EDITOR_PRIMARY_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
@@ -1362,8 +1363,11 @@ export default function PostCard({
                     type="button"
                     disabled={rebloggingId !== null || reblogModalBusy}
                     onClick={() => {
+                      setQuickReblogError(null);
                       setReblogModalError(null);
-                      void onReblog(post, null);
+                      void onReblog(post, null, undefined, undefined, undefined, {
+                        onError: (msg) => setQuickReblogError(msg),
+                      });
                     }}
                     className={`${REBLOG_INSTANT_SECONDARY_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
                       rebloggingId === post.id
@@ -1555,11 +1559,14 @@ export default function PostCard({
             return;
           }
           setReblogModalError(null);
+          setQuickReblogError(null);
           setReblogModalBusy(true);
           try {
             const editorMarksMature =
               reblogModalPost.is_nsfw === true ? false : Boolean(isNsfw);
-            const ok = await onReblog(reblogModalPost, trimmed, tags, editorMarksMature, images);
+            const ok = await onReblog(reblogModalPost, trimmed, tags, editorMarksMature, images, {
+              onError: (msg) => setReblogModalError(msg),
+            });
             if (ok && trimmed.length > 0) {
               recordSuccessfulUserWrittenPost(normalizePostBodyForDedup(trimmed));
             }

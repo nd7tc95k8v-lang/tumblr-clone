@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { alertIfLikelyRateOrGuardFailure } from "@/lib/action-guard/alert-insert-blocked";
+import { resolveLikelyRateOrGuardFailureMessage } from "@/lib/action-guard/resolve-rate-or-guard-failure";
 import { displayUsername, formatRelativePostTime } from "@/lib/feed-post-display";
 import {
   normalizePostBodyForDedup,
@@ -195,6 +195,7 @@ export default function PostNotesModal({
   const [composerError, setComposerError] = useState<string | null>(null);
   const [composerSubmitting, setComposerSubmitting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [followActionError, setFollowActionError] = useState<string | null>(null);
   const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
   /** Dev-only: last successful fetch comment read paths (list vs count). */
   const [devCommentReadDiag, setDevCommentReadDiag] = useState<{
@@ -323,6 +324,7 @@ export default function PostNotesModal({
       setComposerError(null);
       setComposerSubmitting(false);
       setDeleteError(null);
+      setFollowActionError(null);
       setDeletingCommentId(null);
       setDevCommentReadDiag(null);
       setDevCommentSubtotalCompare(null);
@@ -355,6 +357,7 @@ export default function PostNotesModal({
 
       followPendingRef.current.add(targetUserId);
       setFollowPendingIds((prev) => new Set(prev).add(targetUserId));
+      setFollowActionError(null);
 
       try {
         if (isFollowing) {
@@ -380,7 +383,12 @@ export default function PostNotesModal({
             });
             if (insErr) {
               console.error(insErr);
-              await alertIfLikelyRateOrGuardFailure(supabase, insErr, { kind: "follow", followMode: "insert" });
+              setFollowActionError(
+                await resolveLikelyRateOrGuardFailureMessage(supabase, insErr, {
+                  kind: "follow",
+                  followMode: "insert",
+                }),
+              );
               return;
             }
             setFollowedIdSet((prev) => new Set(prev).add(targetUserId));
@@ -449,7 +457,9 @@ export default function PostNotesModal({
 
         if (insErr) {
           console.error(insErr);
-          await alertIfLikelyRateOrGuardFailure(supabase, insErr, { kind: "note_comment" });
+          setComposerError(
+            await resolveLikelyRateOrGuardFailureMessage(supabase, insErr, { kind: "note_comment" }),
+          );
           return;
         }
         applyNoteCommentCountDelta?.(1);
@@ -482,8 +492,9 @@ export default function PostNotesModal({
           const { error: delErr } = await supabase.from("post_note_comments").delete().eq("id", commentId);
           if (delErr) {
             console.error(delErr);
-            await alertIfLikelyRateOrGuardFailure(supabase, delErr, { kind: "note_comment" });
-            setDeleteError(delErr.message?.trim() ? delErr.message : "Could not remove that note.");
+            setDeleteError(
+              await resolveLikelyRateOrGuardFailureMessage(supabase, delErr, { kind: "note_comment" }),
+            );
             return;
           }
           applyNoteCommentCountDelta?.(-1);
@@ -584,6 +595,14 @@ export default function PostNotesModal({
 
         {error ? (
           <InlineErrorBanner message={error} onDismiss={() => setError(null)} className="mb-3" />
+        ) : null}
+
+        {followActionError ? (
+          <InlineErrorBanner
+            message={followActionError}
+            onDismiss={() => setFollowActionError(null)}
+            className="mb-3"
+          />
         ) : null}
 
         {deleteError ? (

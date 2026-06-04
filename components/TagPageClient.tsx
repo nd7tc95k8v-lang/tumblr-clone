@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import Link from "next/link";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -15,7 +15,12 @@ import {
   resolveNsfwFeedModeFromProfileRow,
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
-import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import {
+  appendFeedPostsDedupe,
+  DEFAULT_FEED_PAGE_SIZE,
+  fetchFeedPosts,
+  type FeedPageCursor,
+} from "@/lib/supabase/fetch-feed-posts";
 import type { FeedPost } from "@/types/post";
 import Feed from "./Feed";
 import { useReblogAction } from "./useReblogAction";
@@ -24,15 +29,29 @@ type Props = {
   tag: string;
   initialPosts: FeedPost[];
   initialLoadError: string | null;
+  initialHasMore?: boolean;
   /** Total posts with this normalized tag in `posts.tags`; null if unknown. */
   postCount: number | null;
 };
 
-export default function TagPageClient({ tag, initialPosts, initialLoadError, postCount }: Props) {
+const TAG_PAGE_SIZE = DEFAULT_FEED_PAGE_SIZE;
+
+export default function TagPageClient({
+  tag,
+  initialPosts,
+  initialLoadError,
+  initialHasMore = false,
+  postCount,
+}: Props) {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
   const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
+  const postsRef = useRef<FeedPost[]>(initialPosts);
+  postsRef.current = posts;
+  const [cursor, setCursor] = useState<FeedPageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(initialHasMore);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(initialLoadError);
   const [tagFollowed, setTagFollowed] = useState<boolean | null>(null);
   const [tagFollowBusy, setTagFollowBusy] = useState(false);
@@ -72,9 +91,9 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
       .select("default_posts_nsfw")
       .eq("id", user.id)
       .maybeSingle()
-      .then(({ data, error }) => {
+      .then(({ data, error: profErr }) => {
         if (!cancelled) {
-          if (error) console.error(error);
+          if (profErr) console.error(profErr);
           setViewerDefaultPostsNsfw(Boolean(data?.default_posts_nsfw));
         }
       });
@@ -94,8 +113,8 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
       .select("nsfw_feed_mode")
       .eq("id", user.id)
       .maybeSingle()
-      .then(({ data, error }) => {
-        if (error) console.error(error);
+      .then(({ data, error: profErr }) => {
+        if (profErr) console.error(profErr);
         if (!cancelled) {
           setNsfwFeedMode(resolveNsfwFeedModeFromProfileRow(data));
         }
@@ -105,30 +124,65 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
     };
   }, [supabase, user]);
 
-  const loadPosts = useCallback(async () => {
-    if (!supabase) return;
-    setLoading(true);
+  const applyTagPage = useCallback((result: Awaited<ReturnType<typeof fetchFeedPosts>>, replace: boolean) => {
+    if (result.error) {
+      setError(result.error.message);
+      if (replace) {
+        setPosts([]);
+        setHasMore(false);
+        setCursor(null);
+      }
+      return;
+    }
     setError(null);
-    try {
-      const { data, error: fetchError } = await fetchFeedPosts(supabase, {
+    setPosts((prev) => (replace ? (result.data ?? []) : appendFeedPostsDedupe(prev, result.data ?? [])));
+    setCursor(result.nextCursor);
+    setHasMore(result.hasMore);
+  }, []);
+
+  const fetchTagPage = useCallback(
+    async (opts: { cursor: FeedPageCursor | null; replace: boolean }) => {
+      if (!supabase) return;
+      const result = await fetchFeedPosts(supabase, {
+        limit: TAG_PAGE_SIZE,
+        cursor: opts.cursor,
         filterTag: tag,
         viewerUserId: user?.id ?? null,
         excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
       });
-      if (fetchError) {
-        setError(fetchError.message);
-        return;
-      }
-      setPosts(data ?? []);
+      applyTagPage(result, opts.replace);
+    },
+    [supabase, tag, user?.id, nsfwFeedMode, applyTagPage],
+  );
+
+  const loadPosts = useCallback(async () => {
+    if (!supabase) return;
+    const showSkeleton = postsRef.current.length === 0;
+    setError(null);
+    if (showSkeleton) setLoading(true);
+    try {
+      await fetchTagPage({ cursor: null, replace: true });
     } finally {
       setLoading(false);
     }
-  }, [supabase, tag, user?.id, nsfwFeedMode]);
+  }, [supabase, fetchTagPage]);
 
   useEffect(() => {
     if (!supabase) return;
     void loadPosts();
-  }, [supabase, user?.id, loadPosts]);
+  }, [supabase, loadPosts]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!hasMore || loadingMore || loading || !cursor) return;
+    setLoadingMore(true);
+    void (async () => {
+      try {
+        await fetchTagPage({ cursor, replace: false });
+      } finally {
+        setLoadingMore(false);
+      }
+    })();
+  }, [hasMore, loadingMore, loading, cursor, fetchTagPage]);
 
   const refreshTagFollowState = useCallback(async () => {
     if (!supabase || !user) {
@@ -241,9 +295,9 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
       ) : null}
       <Feed
         posts={posts}
-        loading={loading}
+        loading={loading && posts.length === 0}
         error={error}
-        onRetry={loadPosts}
+        onRetry={() => void loadPosts()}
         onReblog={handleReblog}
         showReblog={Boolean(user)}
         supabase={supabase}
@@ -252,6 +306,10 @@ export default function TagPageClient({ tag, initialPosts, initialLoadError, pos
         onPostUpdated={loadPosts}
         viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
         nsfwFeedMode={nsfwFeedMode}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        onLoadMore={handleLoadMore}
+        onRefresh={loadPosts}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">

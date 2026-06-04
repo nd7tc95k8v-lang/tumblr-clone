@@ -1,8 +1,10 @@
 "use client";
 
+import Link from "next/link";
 import React, { useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { APP_NAME } from "@/lib/constants";
+import { AUTH_FORGOT_PASSWORD_PATH } from "@/lib/auth/password-reset";
 
 type Props = {
   supabase: SupabaseClient;
@@ -71,6 +73,14 @@ export default function AuthForm({ supabase, onAuthChange }: Props) {
         onChange={(e) => setPassword(e.target.value)}
         className="qrtz-field"
       />
+      {mode === "signin" ? (
+        <Link
+          href={AUTH_FORGOT_PASSWORD_PATH}
+          className="-mt-1 text-sm text-link transition-colors hover:text-link-hover hover:underline"
+        >
+          Forgot password?
+        </Link>
+      ) : null}
       {message && (
         <p className="text-sm text-warning">{message}</p>
       )}

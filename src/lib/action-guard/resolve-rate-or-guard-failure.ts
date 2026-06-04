@@ -8,6 +8,9 @@ import {
 import { fetchActionGuardStatus } from "./fetch-action-guard-status";
 import type { ProtectedActionSpec } from "./types";
 
+const NOTE_COMMENT_GUARD_MESSAGE =
+  "Could not add that note. If it keeps happening, wait a minute and try again.";
+
 function isRlsLikeError(error: { message?: string; code?: string }): boolean {
   const code = String(error.code ?? "");
   const msg = (error.message ?? "").toLowerCase();
@@ -20,50 +23,43 @@ function isRlsLikeError(error: { message?: string; code?: string }): boolean {
 }
 
 /** Map common Supabase errors after a guarded insert/delete to user-facing text. */
-export async function alertIfLikelyRateOrGuardFailure(
+export async function resolveLikelyRateOrGuardFailureMessage(
   supabase: SupabaseClient,
   error: { message?: string; code?: string } | null,
   spec: ProtectedActionSpec,
-): Promise<void> {
+): Promise<string> {
   if (!error) {
-    alert(ACTION_GUARD_GENERIC_MESSAGE);
-    return;
+    return ACTION_GUARD_GENERIC_MESSAGE;
   }
 
   if (!isRlsLikeError(error)) {
-    alert(error.message?.trim() ? error.message : ACTION_GUARD_GENERIC_MESSAGE);
-    return;
+    return error.message?.trim() ? error.message : ACTION_GUARD_GENERIC_MESSAGE;
   }
 
   const status = await fetchActionGuardStatus(supabase);
   if (!status) {
-    alert(ACTION_GUARD_GENERIC_MESSAGE);
-    return;
+    return ACTION_GUARD_GENERIC_MESSAGE;
   }
 
   if (!status.human_check_ok) {
-    alert(HUMAN_VERIFICATION_NEEDED_MESSAGE);
-    return;
+    return HUMAN_VERIFICATION_NEEDED_MESSAGE;
   }
 
   if (spec.kind === "post" || spec.kind === "reblog") {
     if (!status.post_rate_ok) {
-      alert(POSTING_TOO_QUICK_MESSAGE);
-      return;
+      return POSTING_TOO_QUICK_MESSAGE;
     }
   }
 
   if (spec.kind === "follow" && spec.followMode === "insert") {
     if (!status.follow_insert_rate_ok) {
-      alert(FOLLOW_RATE_LIMIT_MESSAGE);
-      return;
+      return FOLLOW_RATE_LIMIT_MESSAGE;
     }
   }
 
   if (spec.kind === "note_comment") {
-    alert("Could not add that note. If it keeps happening, wait a minute and try again.");
-    return;
+    return NOTE_COMMENT_GUARD_MESSAGE;
   }
 
-  alert(ACTION_GUARD_GENERIC_MESSAGE);
+  return ACTION_GUARD_GENERIC_MESSAGE;
 }

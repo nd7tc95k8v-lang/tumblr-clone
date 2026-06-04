@@ -5,11 +5,15 @@ import Link from "next/link";
 import type { User } from "@supabase/supabase-js";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import {
-  fetchFeedPosts,
-  fetchFeedPostsForFollowedTagsOverlap,
-  mergeFollowingFeedSources,
+  appendFeedPostsDedupe,
+  DEFAULT_FEED_PAGE_SIZE,
+  type FeedPageCursor,
 } from "@/lib/supabase/fetch-feed-posts";
-import { annotatePostsForHomeFollowingFeed } from "@/lib/home-following-feed";
+import {
+  fetchHomeFollowingFeedNewerThan,
+  fetchHomeFollowingFeedPage,
+  HOME_FEED_POLL_NEWER_LIMIT,
+} from "@/lib/supabase/fetch-home-following-feed-page";
 import { noteOwnerPostIdForCard } from "@/lib/feed-post-display";
 import {
   DEFAULT_NSFW_FEED_MODE,
@@ -18,6 +22,7 @@ import {
 } from "@/lib/nsfw-feed-preference";
 import { fetchFollowedTagStringsForUser } from "@/lib/supabase/followed-tags";
 import { profileNeedsOnboarding } from "@/lib/username";
+import { redirectRecoveryHashFromHomeIfNeeded } from "@/lib/auth/password-reset";
 import type { FeedPost, PostAuthorEmbed } from "@/types/post";
 import AuthForm from "./AuthForm";
 import ContentSafetyOnboarding, { readContentSafetyOnboardingDismissed } from "./ContentSafetyOnboarding";
@@ -69,25 +74,15 @@ function mergePendingDedupe(incoming: FeedPost[], prev: FeedPost[]): FeedPost[] 
   return out;
 }
 
-/**
- * Home following feed should not show reblogs from non-followed users: keep posts/reblogs from you and
- * people you follow, plus originals discovered via followed tags (see {@link FeedPost.homeFollowingMatchedTag}).
- */
-function filterHomeFollowingFeedByAllowedAuthors(
-  posts: FeedPost[],
-  viewerUserId: string,
-  followedUserIds: string[],
-): FeedPost[] {
-  const allowedAuthorIds = new Set<string>([viewerUserId, ...followedUserIds]);
-  return posts.filter((p) => {
-    if (allowedAuthorIds.has(p.user_id)) return true;
-    if (p.reblog_of != null) return false;
-    return Boolean(p.homeFollowingMatchedTag);
-  });
-}
-
 const BACKGROUND_FEED_POLL_MS = 25_000;
 const SCROLL_TOP_THRESHOLD_PX = 12;
+const HOME_PAGE_SIZE = DEFAULT_FEED_PAGE_SIZE;
+
+type HomeFeedContext = {
+  followedUserIds: string[];
+  followedTags: string[];
+  excludeNsfwFromFeed: boolean;
+};
 
 function ClientShell() {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -95,6 +90,9 @@ function ClientShell() {
   const [sessionReady, setSessionReady] = useState(false);
   const [posts, setPosts] = useState<FeedPost[]>([]);
   const [postsLoading, setPostsLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [feedCursor, setFeedCursor] = useState<FeedPageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(false);
   const [postsError, setPostsError] = useState<string | null>(null);
   const [profile, setProfile] = useState<ProfileRow | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -107,6 +105,8 @@ function ClientShell() {
 
   const postsRef = useRef<FeedPost[]>([]);
   postsRef.current = posts;
+
+  const homeFeedContextRef = useRef<HomeFeedContext | null>(null);
 
   const pendingScrollAdjustRef = useRef(false);
   const docHeightBeforePendingRef = useRef<number | null>(null);
@@ -177,10 +177,12 @@ function ClientShell() {
         setFollowingOthersCount(null);
         setPosts([]);
         setPendingNewPosts([]);
+        setFeedCursor(null);
+        setHasMore(false);
+        homeFeedContextRef.current = null;
         return;
       }
 
-      let filterUserIds: string[] | undefined;
       let followedTagStrings: string[] = [];
       const { data: followRows, error: followError } = await supabase
         .from("follows")
@@ -193,7 +195,6 @@ function ClientShell() {
       }
       const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
       setFollowingOthersCount(followedIds.length);
-      filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
 
       const { tags, error: tagsError } = await fetchFollowedTagStringsForUser(supabase, user.id);
       if (tagsError) {
@@ -202,90 +203,93 @@ function ClientShell() {
       }
       followedTagStrings = tags;
 
-      const { data: userFeed, error: userFeedError } = await fetchFeedPosts(supabase, {
-        filterUserIds,
-        viewerUserId: user.id,
+      homeFeedContextRef.current = {
+        followedUserIds: followedIds,
+        followedTags: followedTagStrings,
         excludeNsfwFromFeed,
+      };
+
+      const { data, error, nextCursor, hasMore: pageHasMore } = await fetchHomeFollowingFeedPage(supabase, {
+        viewerUserId: user.id,
+        followedUserIds: followedIds,
+        followedTags: followedTagStrings,
+        excludeNsfwFromFeed,
+        limit: HOME_PAGE_SIZE,
+        cursor: null,
       });
-      if (userFeedError) {
-        setPostsError(userFeedError.message);
+      if (error) {
+        setPostsError(error.message);
         return;
       }
-      let merged = userFeed ?? [];
-      if (followedTagStrings.length > 0) {
-        const { data: tagFeed, error: tagFeedError } = await fetchFeedPostsForFollowedTagsOverlap(
-          supabase,
-          followedTagStrings,
-          user.id,
-          { excludeNsfwFromFeed },
-        );
-        if (tagFeedError) {
-          setPostsError(tagFeedError.message);
-          return;
-        }
-        merged = mergeFollowingFeedSources(merged, tagFeed ?? []);
-      }
-      const annotated = annotatePostsForHomeFollowingFeed(merged, followedTagStrings);
-      setPosts(filterHomeFollowingFeedByAllowedAuthors(annotated, user.id, followedIds));
+      setPosts(data ?? []);
+      setFeedCursor(nextCursor);
+      setHasMore(pageHasMore);
       setPendingNewPosts([]);
     } finally {
       setPostsLoading(false);
     }
   }, [supabase, user, profile]);
 
-  /** Same query as `loadPosts`, for background polling only — does not touch loading UI or replace the feed. */
-  const fetchFeedPostsSnapshot = useCallback(async (): Promise<{ posts: FeedPost[]; error: string | null }> => {
+  const loadMorePosts = useCallback(async () => {
+    if (!supabase || !user || loadingMore || !hasMore || !feedCursor) return;
+    const ctx = homeFeedContextRef.current;
+    if (!ctx) return;
+
+    setLoadingMore(true);
+    try {
+      const { data, error, nextCursor, hasMore: pageHasMore } = await fetchHomeFollowingFeedPage(supabase, {
+        viewerUserId: user.id,
+        followedUserIds: ctx.followedUserIds,
+        followedTags: ctx.followedTags,
+        excludeNsfwFromFeed: ctx.excludeNsfwFromFeed,
+        limit: HOME_PAGE_SIZE,
+        cursor: feedCursor,
+      });
+      if (error) {
+        setPostsError(error.message);
+        return;
+      }
+      setPosts((prev) => appendFeedPostsDedupe(prev, data ?? []));
+      setFeedCursor(nextCursor);
+      setHasMore(pageHasMore);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [supabase, user, loadingMore, hasMore, feedCursor]);
+
+  /** Newer-than-current-top fetch for background polling — does not touch loading UI or replace the feed. */
+  const fetchNewerPostsForPoll = useCallback(async (): Promise<{ posts: FeedPost[]; error: string | null }> => {
     if (!supabase) return { posts: [], error: null };
     if (!user) return { posts: [], error: null };
+    const ctx = homeFeedContextRef.current;
+    if (!ctx) return { posts: [], error: null };
     try {
-      const excludeNsfwFromFeed =
-        Boolean(user) && Boolean(profile) && excludeNsfwPostsFromFeedQuery(resolveNsfwFeedModeFromProfileRow(profile));
-
-      let filterUserIds: string[] | undefined;
-      let followedTagStrings: string[] = [];
-      const { data: followRows, error: followError } = await supabase
-        .from("follows")
-        .select("following_id")
-        .eq("follower_id", user.id);
-      if (followError) {
-        return { posts: [], error: followError.message };
+      const top = postsRef.current[0];
+      const result = top
+        ? await fetchHomeFollowingFeedNewerThan(supabase, {
+            viewerUserId: user.id,
+            followedUserIds: ctx.followedUserIds,
+            followedTags: ctx.followedTags,
+            excludeNsfwFromFeed: ctx.excludeNsfwFromFeed,
+            newerThan: { created_at: top.created_at, id: top.id },
+            limit: HOME_FEED_POLL_NEWER_LIMIT,
+          })
+        : await fetchHomeFollowingFeedPage(supabase, {
+            viewerUserId: user.id,
+            followedUserIds: ctx.followedUserIds,
+            followedTags: ctx.followedTags,
+            excludeNsfwFromFeed: ctx.excludeNsfwFromFeed,
+            limit: HOME_FEED_POLL_NEWER_LIMIT,
+            cursor: null,
+          });
+      if (result.error) {
+        return { posts: [], error: result.error.message };
       }
-      const followedIds = (followRows ?? []).map((r: { following_id: string }) => r.following_id);
-      filterUserIds = Array.from(new Set<string>([user.id, ...followedIds]));
-
-      const { tags, error: tagsError } = await fetchFollowedTagStringsForUser(supabase, user.id);
-      if (tagsError) {
-        return { posts: [], error: tagsError.message };
-      }
-      followedTagStrings = tags;
-
-      const { data: userFeed, error: userFeedError } = await fetchFeedPosts(supabase, {
-        filterUserIds,
-        viewerUserId: user.id,
-        excludeNsfwFromFeed,
-      });
-      if (userFeedError) {
-        return { posts: [], error: userFeedError.message };
-      }
-      let merged = userFeed ?? [];
-      if (followedTagStrings.length > 0) {
-        const { data: tagFeed, error: tagFeedError } = await fetchFeedPostsForFollowedTagsOverlap(
-          supabase,
-          followedTagStrings,
-          user.id,
-          { excludeNsfwFromFeed },
-        );
-        if (tagFeedError) {
-          return { posts: [], error: tagFeedError.message };
-        }
-        merged = mergeFollowingFeedSources(merged, tagFeed ?? []);
-      }
-      const annotated = annotatePostsForHomeFollowingFeed(merged, followedTagStrings);
-      return { posts: filterHomeFollowingFeedByAllowedAuthors(annotated, user.id, followedIds), error: null };
+      return { posts: result.data ?? [], error: null };
     } catch (e) {
       return { posts: [], error: e instanceof Error ? e.message : "Unknown error" };
     }
-  }, [supabase, user, profile]);
+  }, [supabase, user]);
 
   const prependPostWithScrollPreserve = useCallback((post: FeedPost) => {
     docHeightBeforePendingRef.current = document.documentElement.scrollHeight;
@@ -404,10 +408,10 @@ function ClientShell() {
 
   const runBackgroundFeedPoll = useCallback(async () => {
     if (!showFeed || needsOnboarding || postsLoading) return;
-    const { posts: snapshot, error } = await fetchFeedPostsSnapshot();
+    const { posts: fetched, error } = await fetchNewerPostsForPoll();
     if (error) return;
     const current = postsRef.current;
-    const newAtTop = computePostsNewerThanTop(snapshot, current);
+    const newAtTop = computePostsNewerThanTop(fetched, current);
     if (newAtTop.length === 0) return;
 
     const nearTop = window.scrollY <= SCROLL_TOP_THRESHOLD_PX;
@@ -421,7 +425,7 @@ function ClientShell() {
     showFeed,
     needsOnboarding,
     postsLoading,
-    fetchFeedPostsSnapshot,
+    fetchNewerPostsForPoll,
     prependManyWithScrollPreserve,
   ]);
 
@@ -530,6 +534,10 @@ function ClientShell() {
             onPostDeleted={loadPosts}
             onPostUpdated={loadPosts}
             nsfwFeedMode={homeFeedNsfwMode}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => void loadMorePosts()}
+            onRefresh={loadPosts}
           />
         </>
       ) : user ? (
@@ -559,6 +567,7 @@ function ClientShell() {
 export default function HomeClient() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
+    if (redirectRecoveryHashFromHomeIfNeeded()) return;
     setMounted(true);
   }, []);
 

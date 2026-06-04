@@ -1,7 +1,7 @@
 import React, { Suspense } from "react";
 import ExploreClient from "../../../components/ExploreClient";
 import { TrendingTagsSkeleton } from "../../../components/TrendingTags";
-import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { DEFAULT_FEED_PAGE_SIZE, fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
 import { createAnonServerClient } from "@/lib/supabase/server-anon";
 import ExploreTrendingTags from "./ExploreTrendingTags";
 
@@ -20,7 +20,7 @@ export default async function ExplorePage() {
     );
   }
 
-  const { data, error } = await fetchFeedPosts(supabase, {});
+  const { data, error, hasMore } = await fetchFeedPosts(supabase, { limit: DEFAULT_FEED_PAGE_SIZE });
 
   return (
     <main className="flex min-h-screen flex-col items-center bg-bg px-3 pt-6 pb-10 md:px-6 md:py-10">
@@ -30,7 +30,11 @@ export default async function ExplorePage() {
           <Suspense fallback={<TrendingTagsSkeleton />}>
             <ExploreTrendingTags />
           </Suspense>
-          <ExploreClient initialPosts={data ?? []} initialLoadError={error?.message ?? null} />
+          <ExploreClient
+            initialPosts={data ?? []}
+            initialLoadError={error?.message ?? null}
+            initialHasMore={hasMore}
+          />
         </div>
       </section>
     </main>

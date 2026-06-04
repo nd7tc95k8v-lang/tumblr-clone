@@ -10,7 +10,12 @@ import {
   resolveNsfwFeedModeFromProfileRow,
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
-import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import {
+  appendFeedPostsDedupe,
+  DEFAULT_FEED_PAGE_SIZE,
+  fetchFeedPosts,
+  type FeedPageCursor,
+} from "@/lib/supabase/fetch-feed-posts";
 import type { FeedPost } from "@/types/post";
 import Feed from "./Feed";
 import { useReblogAction } from "./useReblogAction";
@@ -18,18 +23,61 @@ import { useReblogAction } from "./useReblogAction";
 type Props = {
   initialPosts: FeedPost[];
   initialLoadError: string | null;
+  initialHasMore?: boolean;
 };
 
-export default function ExploreClient({ initialPosts, initialLoadError }: Props) {
+const EXPLORE_PAGE_SIZE = DEFAULT_FEED_PAGE_SIZE;
+
+export default function ExploreClient({ initialPosts, initialLoadError, initialHasMore = false }: Props) {
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
   const [user, setUser] = useState<User | null>(null);
   const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
   const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
-  const [posts, setPosts] = useState<FeedPost[]>([]);
+  const [posts, setPosts] = useState<FeedPost[]>(initialPosts);
+  const [cursor, setCursor] = useState<FeedPageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(initialHasMore);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState<string | null>(initialLoadError);
 
   const bootstrapSeq = useRef(0);
+  const nsfwFeedModeRef = useRef(nsfwFeedMode);
+  nsfwFeedModeRef.current = nsfwFeedMode;
+  const userRef = useRef(user);
+  userRef.current = user;
+
+  const applyExplorePage = useCallback(
+    (result: Awaited<ReturnType<typeof fetchFeedPosts>>, replace: boolean) => {
+      if (result.error) {
+        setError(result.error.message);
+        if (replace) setPosts([]);
+        setHasMore(false);
+        setCursor(null);
+        return;
+      }
+      setError(null);
+      setPosts((prev) => (replace ? (result.data ?? []) : appendFeedPostsDedupe(prev, result.data ?? [])));
+      setCursor(result.nextCursor);
+      setHasMore(result.hasMore);
+    },
+    [],
+  );
+
+  const fetchExplorePage = useCallback(
+    async (opts: { cursor: FeedPageCursor | null; replace: boolean }) => {
+      if (!supabase) return;
+      const u = userRef.current;
+      const mode = nsfwFeedModeRef.current;
+      const result = await fetchFeedPosts(supabase, {
+        limit: EXPLORE_PAGE_SIZE,
+        cursor: opts.cursor,
+        viewerUserId: u?.id ?? null,
+        excludeNsfwFromFeed: Boolean(u) && excludeNsfwPostsFromFeedQuery(mode),
+      });
+      applyExplorePage(result, opts.replace);
+    },
+    [supabase, applyExplorePage],
+  );
 
   useEffect(() => {
     if (!supabase) return;
@@ -52,6 +100,13 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
         setViewerDefaultPostsNsfw(false);
         setPosts(initialPosts);
         setError(initialLoadError);
+        setHasMore(initialHasMore);
+        const last = initialPosts[initialPosts.length - 1];
+        setCursor(
+          initialHasMore && last
+            ? { created_at: last.created_at, id: last.id }
+            : null,
+        );
         setLoading(false);
         return;
       }
@@ -69,20 +124,18 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
       const mode = resolveNsfwFeedModeFromProfileRow(prof);
       setNsfwFeedMode(mode);
       setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
+      nsfwFeedModeRef.current = mode;
+      userRef.current = u;
 
-      const { data, error: fetchError } = await fetchFeedPosts(supabase, {
+      const result = await fetchFeedPosts(supabase, {
+        limit: EXPLORE_PAGE_SIZE,
+        cursor: null,
         viewerUserId: u.id,
         excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
       });
       if (seq !== bootstrapSeq.current) return;
 
-      if (fetchError) {
-        setError(fetchError.message);
-        setPosts([]);
-      } else {
-        setError(null);
-        setPosts(data ?? []);
-      }
+      applyExplorePage(result, true);
       setLoading(false);
     };
 
@@ -98,7 +151,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
       bootstrapSeq.current += 1;
       subscription.unsubscribe();
     };
-  }, [supabase, initialPosts, initialLoadError]);
+  }, [supabase, initialPosts, initialLoadError, initialHasMore, applyExplorePage]);
 
   const refreshSignedInFeed = useCallback(async () => {
     if (!supabase) return;
@@ -110,6 +163,11 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
       setPosts(initialPosts);
       setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
       setViewerDefaultPostsNsfw(false);
+      setHasMore(initialHasMore);
+      const last = initialPosts[initialPosts.length - 1];
+      setCursor(
+        initialHasMore && last ? { created_at: last.created_at, id: last.id } : null,
+      );
       return;
     }
     const { data: prof } = await supabase
@@ -120,12 +178,22 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
     const mode = resolveNsfwFeedModeFromProfileRow(prof);
     setNsfwFeedMode(mode);
     setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
-    const { data, error: fetchError } = await fetchFeedPosts(supabase, {
-      viewerUserId: u.id,
-      excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
-    });
-    if (!fetchError) setPosts(data ?? []);
-  }, [supabase, initialPosts]);
+    nsfwFeedModeRef.current = mode;
+    userRef.current = u;
+    await fetchExplorePage({ cursor: null, replace: true });
+  }, [supabase, initialPosts, initialHasMore, fetchExplorePage]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!hasMore || loadingMore || loading || !cursor) return;
+    setLoadingMore(true);
+    void (async () => {
+      try {
+        await fetchExplorePage({ cursor, replace: false });
+      } finally {
+        setLoadingMore(false);
+      }
+    })();
+  }, [hasMore, loadingMore, loading, cursor, fetchExplorePage]);
 
   const handleReblog = useReblogAction(supabase, {
     onSuccess: refreshSignedInFeed,
@@ -158,37 +226,7 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
             setLoading(true);
             setError(null);
             try {
-              const {
-                data: { session },
-              } = await supabase.auth.getSession();
-              const u = session?.user ?? null;
-              setUser(u);
-              if (!u) {
-                setNsfwFeedMode(DEFAULT_NSFW_FEED_MODE);
-                setViewerDefaultPostsNsfw(false);
-                setPosts(initialPosts);
-                setError(initialLoadError);
-                return;
-              }
-              const { data: prof } = await supabase
-                .from("profiles")
-                .select("nsfw_feed_mode, default_posts_nsfw")
-                .eq("id", u.id)
-                .maybeSingle();
-              const mode = resolveNsfwFeedModeFromProfileRow(prof);
-              setNsfwFeedMode(mode);
-              setViewerDefaultPostsNsfw(Boolean(prof?.default_posts_nsfw));
-              const { data, error: fetchError } = await fetchFeedPosts(supabase, {
-                viewerUserId: u.id,
-                excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(mode),
-              });
-              if (fetchError) {
-                setError(fetchError.message);
-                setPosts([]);
-              } else {
-                setError(null);
-                setPosts(data ?? []);
-              }
+              await refreshSignedInFeed();
             } finally {
               setLoading(false);
             }
@@ -202,6 +240,10 @@ export default function ExploreClient({ initialPosts, initialLoadError }: Props)
         onPostUpdated={() => void refreshSignedInFeed()}
         nsfwFeedMode={nsfwFeedMode}
         viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        onLoadMore={handleLoadMore}
+        onRefresh={refreshSignedInFeed}
       />
       {!user ? (
         <p className="text-center text-meta text-text-muted">

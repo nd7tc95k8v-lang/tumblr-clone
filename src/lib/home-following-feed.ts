@@ -36,3 +36,20 @@ export function annotatePostsForHomeFollowingFeed(posts: FeedPost[], followedTag
     return { ...p, homeFollowingMatchedTag: matched };
   });
 }
+
+/**
+ * Home following feed should not show reblogs from non-followed users: keep posts/reblogs from you and
+ * people you follow, plus originals discovered via followed tags (see {@link FeedPost.homeFollowingMatchedTag}).
+ */
+export function filterHomeFollowingFeedByAllowedAuthors(
+  posts: FeedPost[],
+  viewerUserId: string,
+  followedUserIds: string[],
+): FeedPost[] {
+  const allowedAuthorIds = new Set<string>([viewerUserId, ...followedUserIds]);
+  return posts.filter((p) => {
+    if (allowedAuthorIds.has(p.user_id)) return true;
+    if (p.reblog_of != null) return false;
+    return Boolean(p.homeFollowingMatchedTag);
+  });
+}

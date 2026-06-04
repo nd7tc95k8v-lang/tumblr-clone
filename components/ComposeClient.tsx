@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { fetchFeedPosts } from "@/lib/supabase/fetch-feed-posts";
+import { fetchFeedPostById } from "@/lib/supabase/fetch-feed-posts";
 import PostForm from "./PostForm";
 
 /** Must match `HomeClient` — sessionStorage handoff for optimistic feed merge after compose. */
@@ -86,10 +86,7 @@ export default function ComposeClient() {
             .limit(1)
             .maybeSingle();
           if (idRow?.id) {
-            const { data: feed } = await fetchFeedPosts(supabase, {
-              viewerUserId: session.user.id,
-            });
-            const post = feed?.find((p) => p.id === idRow.id);
+            const { data: post } = await fetchFeedPostById(supabase, idRow.id, session.user.id);
             if (post) {
               try {
                 sessionStorage.setItem(PENDING_FEED_POST_STORAGE_KEY, JSON.stringify(post));

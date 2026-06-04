@@ -272,10 +272,11 @@ export default function EditProfileModal({
                     }
                     const img = validateImageFile(f);
                     if (!img.ok) {
-                      alert(img.error);
+                      setSaveError(img.error);
                       e.target.value = "";
                       return;
                     }
+                    setSaveError(null);
                     setAvatarFile(f);
                     setRemoveAvatar(false);
                   }}

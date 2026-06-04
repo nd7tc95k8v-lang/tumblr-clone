@@ -12,6 +12,11 @@ import {
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
 import {
+  appendFeedPostsDedupe,
+  DEFAULT_FEED_PAGE_SIZE,
+  type FeedPageCursor,
+} from "@/lib/supabase/fetch-feed-posts";
+import {
   fetchSearchPostsWithTwoTokenFallback,
   normalizeSearchTagList,
   parseSearchTagMatchMode,
@@ -29,7 +34,11 @@ type Props = {
   initialPosts: FeedPost[];
   initialLoadError: string | null;
   initialUsers: SearchUserResult[];
+  initialHasMore?: boolean;
+  initialEffectiveContentSubstring?: string | null;
 };
+
+const SEARCH_PAGE_SIZE = DEFAULT_FEED_PAGE_SIZE;
 
 /** Match PostCard tag chips: small bordered pills, not loud CTAs. */
 const RELATED_TAG_LINK_CLASS =
@@ -45,7 +54,13 @@ function uniqueSortedTagsFromPosts(posts: FeedPost[]): string[] {
   return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
-export default function SearchClient({ initialPosts, initialLoadError, initialUsers }: Props) {
+export default function SearchClient({
+  initialPosts,
+  initialLoadError,
+  initialUsers,
+  initialHasMore = false,
+  initialEffectiveContentSubstring = null,
+}: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = useMemo(() => createBrowserSupabaseClient(), []);
@@ -66,16 +81,24 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
 
   const initialPostsRef = useRef(initialPosts);
   const initialLoadErrorRef = useRef(initialLoadError);
+  const initialEffectiveContentSubstringRef = useRef(initialEffectiveContentSubstring);
   useEffect(() => {
     initialPostsRef.current = initialPosts;
     initialLoadErrorRef.current = initialLoadError;
-  }, [initialPosts, initialLoadError]);
+    initialEffectiveContentSubstringRef.current = initialEffectiveContentSubstring;
+  }, [initialPosts, initialLoadError, initialEffectiveContentSubstring]);
 
   const [user, setUser] = useState<User | null>(null);
   const [nsfwFeedMode, setNsfwFeedMode] = useState<NsfwFeedMode>(DEFAULT_NSFW_FEED_MODE);
   const [viewerDefaultPostsNsfw, setViewerDefaultPostsNsfw] = useState(false);
   /** Signed-in: empty until session + `nsfw_feed_mode` resolved so SSR anon hits never flash for `hide`. */
   const [posts, setPosts] = useState<FeedPost[]>([]);
+  const postsRef = useRef<FeedPost[]>([]);
+  postsRef.current = posts;
+  const [cursor, setCursor] = useState<FeedPageCursor | null>(null);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [effectiveContentSubstring, setEffectiveContentSubstring] = useState<string | null>(null);
   const [users, setUsers] = useState<SearchUserResult[]>(initialUsers);
   const [loading, setLoading] = useState(() => hasQuery);
   const [error, setError] = useState<string | null>(initialLoadError);
@@ -129,6 +152,12 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
         setSignedInFeedPrefsReady(true);
         setPosts(initialPostsRef.current);
         setError(initialLoadErrorRef.current);
+        setHasMore(initialHasMore);
+        const last = initialPostsRef.current[initialPostsRef.current.length - 1];
+        setCursor(
+          initialHasMore && last ? { created_at: last.created_at, id: last.id } : null,
+        );
+        setEffectiveContentSubstring(initialEffectiveContentSubstringRef.current);
         setSessionChecked(true);
         return;
       }
@@ -160,7 +189,59 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       searchBootstrapSeq.current += 1;
       subscription.unsubscribe();
     };
-  }, [supabase]);
+  }, [supabase, initialHasMore]);
+
+  const applySearchPage = useCallback(
+    (
+      result: Awaited<ReturnType<typeof fetchSearchPostsWithTwoTokenFallback>>,
+      replace: boolean,
+    ) => {
+      if (result.error) {
+        setError(result.error.message);
+        if (replace) {
+          setPosts([]);
+          setHasMore(false);
+          setCursor(null);
+          setEffectiveContentSubstring(null);
+        }
+        return;
+      }
+      setError(null);
+      setPosts((prev) => (replace ? (result.data ?? []) : appendFeedPostsDedupe(prev, result.data ?? [])));
+      setCursor(result.nextCursor);
+      setHasMore(result.hasMore);
+      setEffectiveContentSubstring(result.effectiveContentSubstring);
+    },
+    [],
+  );
+
+  const fetchSearchPage = useCallback(
+    async (opts: { cursor: FeedPageCursor | null; replace: boolean }) => {
+      if (!supabase || !hasQuery) return;
+      const result = await fetchSearchPostsWithTwoTokenFallback(supabase, {
+        rawQ: qFromUrl,
+        tagsAny: tagsListFromUrl,
+        tagMatchMode: tagMatchModeFromUrl,
+        viewerUserId: user?.id ?? null,
+        excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
+        limit: SEARCH_PAGE_SIZE,
+        cursor: opts.cursor,
+        effectiveContentSubstring: opts.replace ? undefined : effectiveContentSubstring,
+      });
+      applySearchPage(result, opts.replace);
+    },
+    [
+      supabase,
+      hasQuery,
+      qFromUrl,
+      tagsListFromUrl,
+      tagMatchModeFromUrl,
+      user?.id,
+      nsfwFeedMode,
+      effectiveContentSubstring,
+      applySearchPage,
+    ],
+  );
 
   const loadPosts = useCallback(async () => {
     if (!supabase) return;
@@ -168,27 +249,34 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       setPosts([]);
       setUsers([]);
       setError(null);
+      setHasMore(false);
+      setCursor(null);
+      setEffectiveContentSubstring(null);
       setLoading(false);
       return;
     }
     if (!sessionChecked) return;
     if (user?.id && !signedInFeedPrefsReady) return;
-    setLoading(true);
+
+    const showSkeleton = postsRef.current.length === 0;
     setError(null);
+    if (showSkeleton) setLoading(true);
+
     try {
-      const postPromise = fetchSearchPostsWithTwoTokenFallback(supabase, {
-        rawQ: qFromUrl,
-        tagsAny: tagsListFromUrl,
-        tagMatchMode: tagMatchModeFromUrl,
-        viewerUserId: user?.id ?? null,
-        excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
-      });
       const userText = qFromUrl.trim();
       const userPromise =
         userText.length > 0 ? fetchSearchUsers(supabase, qFromUrl) : Promise.resolve({ data: [], error: null });
 
-      const [{ data, error: fetchError }, { data: userRows, error: userFetchError }] = await Promise.all([
-        postPromise,
+      const [postResult, { data: userRows, error: userFetchError }] = await Promise.all([
+        fetchSearchPostsWithTwoTokenFallback(supabase, {
+          rawQ: qFromUrl,
+          tagsAny: tagsListFromUrl,
+          tagMatchMode: tagMatchModeFromUrl,
+          viewerUserId: user?.id ?? null,
+          excludeNsfwFromFeed: excludeNsfwPostsFromFeedQuery(nsfwFeedMode),
+          limit: SEARCH_PAGE_SIZE,
+          cursor: null,
+        }),
         userPromise,
       ]);
 
@@ -199,11 +287,7 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
         setUsers(userRows ?? []);
       }
 
-      if (fetchError) {
-        setError(fetchError.message);
-        return;
-      }
-      setPosts(data ?? []);
+      applySearchPage(postResult, true);
     } finally {
       setLoading(false);
     }
@@ -217,12 +301,25 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
     nsfwFeedMode,
     sessionChecked,
     signedInFeedPrefsReady,
+    applySearchPage,
   ]);
 
   useEffect(() => {
     if (!supabase) return;
     void loadPosts();
   }, [supabase, loadPosts, sessionChecked, signedInFeedPrefsReady]);
+
+  const handleLoadMore = useCallback(() => {
+    if (!hasMore || loadingMore || loading || !cursor || !hasQuery) return;
+    setLoadingMore(true);
+    void (async () => {
+      try {
+        await fetchSearchPage({ cursor, replace: false });
+      } finally {
+        setLoadingMore(false);
+      }
+    })();
+  }, [hasMore, loadingMore, loading, cursor, hasQuery, fetchSearchPage]);
 
   const submitSearch = useCallback(() => {
     const nextQ = textQ.trim();
@@ -419,9 +516,9 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
       {hasQuery ? (
         <Feed
           posts={posts}
-          loading={loading}
+          loading={loading && posts.length === 0}
           error={error}
-          onRetry={loadPosts}
+          onRetry={() => void loadPosts()}
           onReblog={handleReblog}
           showReblog={Boolean(user)}
           supabase={supabase}
@@ -433,6 +530,10 @@ export default function SearchClient({ initialPosts, initialLoadError, initialUs
           onPostUpdated={loadPosts}
           nsfwFeedMode={nsfwFeedMode}
           viewerDefaultPostsNsfw={viewerDefaultPostsNsfw}
+          hasMore={hasMore}
+          loadingMore={loadingMore}
+          onLoadMore={handleLoadMore}
+          onRefresh={loadPosts}
         />
       ) : (
         <p className="max-w-md text-center text-sm leading-relaxed text-text-secondary">
