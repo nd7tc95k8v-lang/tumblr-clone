@@ -19,7 +19,7 @@ import {
   type NsfwFeedMode,
 } from "@/lib/nsfw-feed-preference";
 import { normalizeUsername } from "@/lib/username";
-import type { ProfileFollowStats } from "@/types/follows";
+import type { FollowListKind, ProfileFollowStats } from "@/types/follows";
 import type { ProfilePublic } from "@/types/profile";
 import type { FeedPost } from "@/types/post";
 import { useActionGuard } from "./ActionGuardProvider";
@@ -27,6 +27,7 @@ import EditProfileModal from "./EditProfileModal";
 import Feed from "./Feed";
 import { InlineErrorBanner } from "./InlineErrorBanner";
 import ProfileAvatar from "./ProfileAvatar";
+import ProfileFollowListModal from "./ProfileFollowListModal";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 import { useReblogAction } from "./useReblogAction";
 
@@ -68,6 +69,8 @@ export default function ProfilePageClient({
   const [followBusy, setFollowBusy] = useState(false);
   const [followError, setFollowError] = useState<string | null>(null);
   const [followStats, setFollowStats] = useState<ProfileFollowStats>(initialFollowStats);
+  const [followListOpen, setFollowListOpen] = useState(false);
+  const [followListKind, setFollowListKind] = useState<FollowListKind>("followers");
   /** When false, fetch only originals (`reblog_of` null); quote reblogs are hidden too. */
   const [showReblogs, setShowReblogs] = useState(true);
   /** Signed-in viewer’s posting default — not `localProfile` when browsing someone else’s blog. */
@@ -232,6 +235,11 @@ export default function ProfilePageClient({
 
   const canFollow = Boolean(user && supabase && user.id !== localProfile.id);
 
+  const openFollowList = useCallback((kind: FollowListKind) => {
+    setFollowListKind(kind);
+    setFollowListOpen(true);
+  }, []);
+
   const refreshFollowState = useCallback(async () => {
     if (!supabase || !user || user.id === localProfile.id) {
       setIsFollowing(null);
@@ -384,12 +392,30 @@ export default function ProfilePageClient({
                   {localProfile.bio.trim()}
                 </p>
               ) : null}
-              <p className="mt-3 text-meta text-text-muted">
-                <span className="font-medium text-text-secondary">{followStats.followers}</span>{" "}
-                followers
-                <span className="mx-2 text-border-soft">·</span>
-                <span className="font-medium text-text-secondary">{followStats.following}</span>{" "}
-                following
+              <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-text-muted">
+                <button
+                  type="button"
+                  onClick={() => openFollowList("followers")}
+                  aria-haspopup="dialog"
+                  aria-label={`${followStats.followers} followers`}
+                  className="rounded-sm transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/75 focus-visible:ring-offset-1 focus-visible:ring-offset-bg"
+                >
+                  <span className="font-medium text-text-secondary">{followStats.followers}</span>{" "}
+                  followers
+                </button>
+                <span className="text-border-soft" aria-hidden="true">
+                  ·
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openFollowList("following")}
+                  aria-haspopup="dialog"
+                  aria-label={`${followStats.following} following`}
+                  className="rounded-sm transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/75 focus-visible:ring-offset-1 focus-visible:ring-offset-bg"
+                >
+                  <span className="font-medium text-text-secondary">{followStats.following}</span>{" "}
+                  following
+                </button>
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -443,6 +469,19 @@ export default function ProfilePageClient({
             onSaved={handleProfileSaved}
           />
         ) : null}
+
+        <ProfileFollowListModal
+          open={followListOpen}
+          onClose={() => setFollowListOpen(false)}
+          supabase={supabase}
+          profileId={localProfile.id}
+          profileUsername={localProfile.username}
+          kind={followListKind}
+          initialCount={
+            followListKind === "followers" ? followStats.followers : followStats.following
+          }
+          isOwnProfile={isOwnProfile}
+        />
 
         <section className="flex w-full flex-col gap-3">
           <div className={`${FEED_OUTER} flex flex-wrap items-end justify-between gap-3`}>
