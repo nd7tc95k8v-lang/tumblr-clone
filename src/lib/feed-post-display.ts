@@ -14,6 +14,25 @@ export function displayUsername(value: string | null | undefined): string {
   return u;
 }
 
+/** True when the ISO string already includes `Z` or a numeric UTC offset. */
+function hasExplicitTimeZoneOffset(iso: string): boolean {
+  return /(?:[zZ]|[+-]\d{2}(?::?\d{2}(?::?\d{2})?)?)$/.test(iso.trim());
+}
+
+/**
+ * Parse a DB `timestamptz` value as a UTC instant.
+ * Postgres / Supabase often return `YYYY-MM-DDTHH:mm:ss[.frac]` without a zone suffix; those are UTC, not local.
+ */
+function parsePostTimestamp(iso: string): Date {
+  const trimmed = iso.trim();
+  if (!trimmed) return new Date(Number.NaN);
+  if (hasExplicitTimeZoneOffset(trimmed)) {
+    return new Date(trimmed);
+  }
+  const normalized = trimmed.includes("T") ? trimmed : trimmed.replace(" ", "T");
+  return new Date(`${normalized}Z`);
+}
+
 /** Viewer device IANA timezone; falls back to locale default when resolution fails. */
 export function resolveViewerTimeZone(): string | undefined {
   try {
@@ -60,7 +79,7 @@ function countCalendarDaysBehind(olderMs: number, newerMs: number, timeZone: str
 export function formatPostTime(iso: string) {
   const timeZone = resolveViewerTimeZone();
   try {
-    return new Date(iso).toLocaleString(
+    return parsePostTimestamp(iso).toLocaleString(
       undefined,
       withViewerTimeZone({ dateStyle: "medium", timeStyle: "short" }, timeZone),
     );
@@ -75,7 +94,7 @@ export function formatRelativePostTime(iso: string): { label: string; full: stri
   const full = formatPostTime(iso);
   let d: Date;
   try {
-    d = new Date(iso);
+    d = parsePostTimestamp(iso);
     if (Number.isNaN(d.getTime())) return { label: full, full };
   } catch {
     return { label: full, full };
