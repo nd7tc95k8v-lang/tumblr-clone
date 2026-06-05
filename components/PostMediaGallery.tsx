@@ -3,6 +3,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizePostImages, type NormalizedPostImage, type PostWithImages } from "@/lib/post-images";
+import { isPostTombstoned } from "@/lib/post-tombstone";
 import PostImageLightbox from "./PostImageLightbox";
 import PostMediaImage from "./PostMediaImage";
 
@@ -29,6 +30,10 @@ export default function PostMediaGallery({
   variant = "feed",
   wrapperClassName = "",
 }: Props) {
+  if (post && isPostTombstoned(post as { deleted_at?: string | null })) {
+    return null;
+  }
+
   const images =
     normalizedImages && normalizedImages.length > 0 ? normalizedImages : post ? normalizePostImages(post) : [];
   const [open, setOpen] = useState(false);

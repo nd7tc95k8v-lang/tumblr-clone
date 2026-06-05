@@ -87,6 +87,7 @@ export async function fetchSearchPosts(
   let query = supabase
     .from("posts")
     .select(POST_FEED_BASE_SELECT)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
 
@@ -323,6 +324,7 @@ export async function countPostsWithTag(
   const { count, error } = await supabase
     .from("posts")
     .select("id", { count: "exact", head: true })
+    .is("deleted_at", null)
     .contains("tags", [tag]);
 
   if (error) {

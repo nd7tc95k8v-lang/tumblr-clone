@@ -8,20 +8,28 @@ import {
   QUOTE_NEST_MAX_INITIAL_DEPTH,
   quotedNestLayerOuterMedia,
   quotedNodeProfile,
+  quotedNodeShowsTombstonedSource,
 } from "@/lib/feed-post-display";
+import type { ThreadRootTombstoneRef } from "@/lib/post-tombstone";
 import ProfileAvatar from "./ProfileAvatar";
 import LinkedPostText from "./LinkedPostText";
 import ProfileUsernameLink from "./ProfileUsernameLink";
 import { QuoteLayerInlineTime } from "./QuoteLayerInlineTime";
 import PostMediaGallery from "./PostMediaGallery";
+import OriginalPostDeleted from "./OriginalPostDeleted";
 
 function QuotedFallbackBody({
   node,
   supabase,
+  threadRoot,
 }: {
   node: QuotedPostNode;
   supabase: SupabaseClient | null;
+  threadRoot: ThreadRootTombstoneRef;
 }) {
+  if (quotedNodeShowsTombstonedSource(node, threadRoot)) {
+    return <OriginalPostDeleted className="mt-1.5" />;
+  }
   return (
     <>
       <p className="mt-1.5 text-meta italic leading-snug text-text-muted">
@@ -41,6 +49,8 @@ function QuotedFallbackBody({
 type Props = {
   node: QuotedPostNode;
   supabase: SupabaseClient | null;
+  /** Merged thread root (`original_post`) for tombstone detection on the chain leaf. */
+  threadRoot?: ThreadRootTombstoneRef;
   /**
    * Max quote layers to show before “Show full chain” (default 3).
    * Newest layers are shown first; older tail is hidden while collapsed.
@@ -58,15 +68,20 @@ function QuotedChainLayer({
   node,
   isFirst,
   supabase,
+  threadRoot,
 }: {
   node: QuotedPostNode;
   isFirst: boolean;
   supabase: SupabaseClient | null;
+  threadRoot: ThreadRootTombstoneRef;
 }) {
   const isLeaf = !node.reblog_of?.trim();
+  const showTombstone = isLeaf && quotedNodeShowsTombstonedSource(node, threadRoot);
   const { primary, primaryRaw, primaryAvatarUrl } = quotedNodeProfile(node);
   const nestOuterMedia =
-    !isLeaf && node.quoted_post ? quotedNestLayerOuterMedia(node) : null;
+    !isLeaf && node.quoted_post && !showTombstone
+      ? quotedNestLayerOuterMedia(node, threadRoot)
+      : null;
 
   return (
     <div className={isFirst ? "min-w-0" : "min-w-0 border-t border-border-soft/45 pt-2 max-md:pt-2.5"}>
@@ -83,18 +98,24 @@ function QuotedChainLayer({
           </div>
           {isLeaf ? (
             <>
-              {node.content ? (
-                <LinkedPostText
-                  text={node.content}
-                  className="mt-1.5 text-base leading-relaxed text-text max-md:text-[0.9375rem] max-md:leading-relaxed"
-                />
-              ) : null}
-              <PostMediaGallery
-                supabase={supabase}
-                post={node}
-                variant="quoted"
-                wrapperClassName="mt-1.5 max-md:mt-1.5"
-              />
+              {showTombstone ? (
+                <OriginalPostDeleted className="mt-1.5 max-md:mt-1.5" />
+              ) : (
+                <>
+                  {node.content ? (
+                    <LinkedPostText
+                      text={node.content}
+                      className="mt-1.5 text-base leading-relaxed text-text max-md:text-[0.9375rem] max-md:leading-relaxed"
+                    />
+                  ) : null}
+                  <PostMediaGallery
+                    supabase={supabase}
+                    post={node}
+                    variant="quoted"
+                    wrapperClassName="mt-1.5 max-md:mt-1.5"
+                  />
+                </>
+              )}
             </>
           ) : (
             <>
@@ -114,7 +135,9 @@ function QuotedChainLayer({
                   wrapperClassName="mt-1.5 max-md:mt-1.5"
                 />
               ) : null}
-              {!node.quoted_post ? <QuotedFallbackBody node={node} supabase={supabase} /> : null}
+              {!node.quoted_post ? (
+                <QuotedFallbackBody node={node} supabase={supabase} threadRoot={threadRoot} />
+              ) : null}
             </>
           )}
         </div>
@@ -130,6 +153,7 @@ function QuotedChainLayer({
 export default function QuotedPostNest({
   node,
   supabase,
+  threadRoot = null,
   maxVisibleDepth = QUOTE_NEST_MAX_INITIAL_DEPTH,
   chainExpanded = false,
   onExpandChain,
@@ -146,6 +170,7 @@ export default function QuotedPostNest({
           node={layerNode}
           isFirst={index === 0}
           supabase={supabase}
+          threadRoot={threadRoot}
         />
       ))}
       {!chainExpanded && hiddenCount > 0 && onExpandChain ? (

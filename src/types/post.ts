@@ -26,6 +26,8 @@ export type EmbeddedPostWithAuthor = {
   tags?: string[] | null;
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
   is_nsfw?: boolean;
+  /** Set when the author tombstoned this thread root; content and owner media are cleared. */
+  deleted_at?: string | null;
 };
 
 /**
@@ -48,6 +50,7 @@ export type QuotedPostNode = {
   tags: string[];
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
   quoted_post: QuotedPostNode | null;
+  deleted_at?: string | null;
 };
 
 export type FeedPost = {
@@ -86,6 +89,8 @@ export type FeedPost = {
   card_engagement_owner_post_id: string;
   /** Mature content flag; enforced and inherited in DB (immutable once true). */
   is_nsfw: boolean;
+  /** Tombstoned thread root: row kept for FKs; author content and owner media removed. */
+  deleted_at?: string | null;
   /** Audit hint from DB: parent_chain | profile_default_posts_nsfw | author | none */
   nsfw_source?: string | null;
   /** Total likes on the thread root (`original_post_id`), same value for every row in the thread. */

@@ -19,6 +19,7 @@ export type ChainPostRow = {
   is_nsfw: boolean;
   tags: string[];
   author?: PostAuthorEmbed | PostAuthorEmbed[] | null;
+  deleted_at?: string | null;
 };
 
 type ChainQueryRow = Omit<ChainPostRow, "original_post_id" | "tags" | "post_images"> & {
@@ -38,6 +39,7 @@ export const POST_CHAIN_SELECT = `
   reblog_commentary,
   original_post_id,
   is_nsfw,
+  deleted_at,
   tags,
   post_images ( id, post_id, storage_path, position, created_at ),
   author:profiles!posts_user_id_fkey ( username, avatar_url )
@@ -54,6 +56,7 @@ function normalizeChainQueryRow(row: ChainQueryRow): ChainPostRow {
     image_storage_path: path,
     post_images: coercePostImageRows(row.post_images, row.id),
     tags: coercePostTags(row.tags),
+    deleted_at: row.deleted_at ?? null,
   };
 }
 
@@ -145,5 +148,6 @@ function embedParentNode(
     tags: row.tags,
     author: row.author,
     quoted_post: quoted,
+    deleted_at: row.deleted_at ?? null,
   };
 }

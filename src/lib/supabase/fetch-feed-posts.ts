@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { noteOwnerPostIdForCard } from "@/lib/feed-post-display";
+import { noteOwnerPostIdForCard, patchQuotedPostChainTombstone } from "@/lib/feed-post-display";
+import { isPostTombstoned } from "@/lib/post-tombstone";
 import { coercePostImageRows } from "@/lib/post-images";
 import { threadRootPostId } from "@/lib/post-thread-root";
 import {
@@ -50,6 +51,7 @@ export const POST_FEED_BASE_SELECT = `
   is_nsfw,
   nsfw_source,
   tags,
+  deleted_at,
   post_images ( id, post_id, storage_path, position, created_at ),
   author:profiles!posts_user_id_fkey ( username, avatar_url )
 `;
@@ -62,6 +64,7 @@ export const POST_ORIGINAL_SELECT = `
   image_storage_path,
   user_id,
   is_nsfw,
+  deleted_at,
   tags,
   post_images ( id, post_id, storage_path, position, created_at ),
   author:profiles!posts_user_id_fkey ( username, avatar_url )
@@ -166,13 +169,26 @@ export async function hydrateFeedPostsFromQueryRows(
     }
   }
 
+  for (const [rootId, embed] of map) {
+    if (!isPostTombstoned(embed)) continue;
+    const chainRow = chainLookup.get(rootId);
+    if (!chainRow) continue;
+    chainRow.deleted_at = embed.deleted_at ?? null;
+    chainRow.content = "";
+    chainRow.image_url = null;
+    chainRow.image_storage_path = null;
+    chainRow.post_images = null;
+  }
+
   const merged: FeedPost[] = feedRows.map((row): FeedPost => {
-    const quoted_post = buildQuotedPostChain(row, chainLookup);
+    const rootEmbed = map.get(row.original_post_id) ?? null;
+    let quoted_post = buildQuotedPostChain(row, chainLookup);
+    quoted_post = patchQuotedPostChainTombstone(quoted_post, rootEmbed);
     const mergedRow: FeedPost = {
       ...row,
       is_nsfw: Boolean(row.is_nsfw),
       tags: coercePostTags(row.tags),
-      original_post: map.get(row.original_post_id) ?? null,
+      original_post: rootEmbed,
       quoted_post,
       like_count: 0,
       reblog_count: 0,
@@ -200,6 +216,7 @@ function feedRowToEmbeddedOriginal(row: FeedRow): EmbeddedPostWithAuthor {
     tags: coercePostTags(row.tags),
     author: row.author,
     is_nsfw: row.is_nsfw,
+    deleted_at: row.deleted_at ?? null,
   };
 }
 
@@ -218,6 +235,7 @@ function feedRowToChainRow(r: FeedRow): ChainPostRow {
     is_nsfw: r.is_nsfw,
     tags: coercePostTags(r.tags),
     author: r.author,
+    deleted_at: r.deleted_at ?? null,
   };
 }
 
@@ -232,6 +250,7 @@ function chainRowToEmbedded(row: ChainPostRow): EmbeddedPostWithAuthor {
     tags: row.tags,
     author: row.author,
     is_nsfw: row.is_nsfw,
+    deleted_at: row.deleted_at ?? null,
   };
 }
 
@@ -352,6 +371,7 @@ export async function fetchFeedPosts(
   let query = supabase
     .from("posts")
     .select(POST_FEED_BASE_SELECT)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
 
@@ -477,6 +497,7 @@ export async function fetchFeedPostsForFollowedTagsOverlap(
   let query = supabase
     .from("posts")
     .select(POST_FEED_BASE_SELECT)
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
   query = query.overlaps("tags", normalizedTags);

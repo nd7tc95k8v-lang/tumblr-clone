@@ -48,6 +48,7 @@ export function filterHomeFollowingFeedByAllowedAuthors(
 ): FeedPost[] {
   const allowedAuthorIds = new Set<string>([viewerUserId, ...followedUserIds]);
   return posts.filter((p) => {
+    if (p.deleted_at) return false;
     if (allowedAuthorIds.has(p.user_id)) return true;
     if (p.reblog_of != null) return false;
     return Boolean(p.homeFollowingMatchedTag);

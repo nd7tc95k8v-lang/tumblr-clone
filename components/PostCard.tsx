@@ -17,6 +17,7 @@ import {
   postCardHeaderAttribution,
   QUOTE_NEST_MAX_INITIAL_DEPTH,
   quoteLayerOuterMedia,
+  quotedNodeShowsTombstonedSource,
   resolvePlainReblogDisplay,
 } from "@/lib/feed-post-display";
 import ProfileAvatar from "./ProfileAvatar";
@@ -29,6 +30,8 @@ import {
   validateUserWrittenContent,
 } from "@/lib/post-content-guard";
 import { InlineErrorBanner } from "./InlineErrorBanner";
+import OriginalPostDeleted from "./OriginalPostDeleted";
+import { isThreadRootTombstoned } from "@/lib/post-tombstone";
 import QuotedPostNest from "./QuotedPostNest";
 import { QuoteLayerInlineTime } from "./QuoteLayerInlineTime";
 import PostNotesModal from "./PostNotesModal";
@@ -295,6 +298,14 @@ function errorMessageFromUnknown(err: unknown, fallback: string): string {
   return fallback;
 }
 
+function messageFromPostDeleteError(err: unknown, fallback: string): string {
+  const raw = errorMessageFromUnknown(err, fallback);
+  if (raw.includes("posts_original_post_id_fkey")) {
+    return "Could not delete this post. Apply migration 042 (tombstone delete) on your database and try again.";
+  }
+  return raw;
+}
+
 function buildMediaSlotsFromPost(post: FeedPost): MediaSlot[] {
   const rows = coercePostImageRows(post.post_images, post.id);
   if (rows?.length) {
@@ -539,6 +550,7 @@ export default function PostCard({
   const highlightSet =
     searchHighlightTags && searchHighlightTags.length > 0 ? new Set(searchHighlightTags) : null;
   const commentary = post.reblog_commentary?.trim() || null;
+  const threadRootTombstoned = isThreadRootTombstoned(post.original_post);
   const quoteOuterMedia = quoteLayerOuterMedia(post);
   const showNestedQuote = Boolean(quoteLayer && post.quoted_post);
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
@@ -672,6 +684,19 @@ export default function PostCard({
 
       const ownerPaths = [...pathSet].filter((p) => p.startsWith(ownerPrefix));
 
+      // Inherited parent paths on reblog rows are allowed while reblog_of is set, but clearing the
+      // denormalized column before delete avoids tripping posts_validate_image_storage_path if the
+      // row (or a child after ON DELETE SET NULL on reblog_of) is updated with reblog_of null.
+      const legacyPath = post.image_storage_path?.trim();
+      if (legacyPath && !legacyPath.startsWith(ownerPrefix)) {
+        const { error: clearPathErr } = await supabase
+          .from("posts")
+          .update({ image_storage_path: null })
+          .eq("id", postId)
+          .eq("user_id", post.user_id);
+        if (clearPathErr) throw clearPathErr;
+      }
+
       const removable: string[] = [];
       for (const path of ownerPaths) {
         const { count: piCount, error: c1 } = await supabase
@@ -691,20 +716,26 @@ export default function PostCard({
         }
       }
 
-      const { error: delPostErr } = await supabase.from("posts").delete().eq("id", postId);
+      const { data: rpcPaths, error: delPostErr } = await supabase.rpc("delete_own_post", {
+        p_post_id: postId,
+      });
       if (delPostErr) throw delPostErr;
 
       if (mountedRef.current) closeOwnerMenu();
 
-      if (removable.length > 0) {
-        const { error: rmErr } = await supabase.storage.from("post-images").remove(removable);
+      const rpcStoragePaths = Array.isArray(rpcPaths)
+        ? rpcPaths.filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+        : [];
+      const storageCandidates = [...new Set([...removable, ...rpcStoragePaths])];
+      if (storageCandidates.length > 0) {
+        const { error: rmErr } = await supabase.storage.from("post-images").remove(storageCandidates);
         if (rmErr) console.error("Post delete: storage remove failed", rmErr);
       }
 
       await onPostDeleted?.();
     } catch (err: unknown) {
       if (mountedRef.current) {
-        setDeleteError(errorMessageFromUnknown(err, "Could not delete this post."));
+        setDeleteError(messageFromPostDeleteError(err, "Could not delete this post."));
       }
     } finally {
       if (mountedRef.current) setDeleteBusy(false);
@@ -1103,18 +1134,24 @@ export default function PostCard({
               ) : null}
               {plainResolved?.kind === "flat" ? (
                 <>
-                  {plainResolved.leaf.content ? (
-                    <LinkedPostText
-                      text={plainResolved.leaf.content}
-                      className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
-                    />
-                  ) : null}
-                  <PostMediaGallery
-                    supabase={supabase}
-                    post={plainResolved.leaf}
-                    variant="feed"
-                    wrapperClassName="mt-2.5"
-                  />
+                  {quotedNodeShowsTombstonedSource(plainResolved.leaf, post.original_post) ? (
+                    <OriginalPostDeleted className="mt-2.5" />
+                  ) : (
+                    <>
+                      {plainResolved.leaf.content ? (
+                        <LinkedPostText
+                          text={plainResolved.leaf.content}
+                          className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                        />
+                      ) : null}
+                      <PostMediaGallery
+                        supabase={supabase}
+                        post={plainResolved.leaf}
+                        variant="feed"
+                        wrapperClassName="mt-2.5"
+                      />
+                    </>
+                  )}
                 </>
               ) : null}
               {plainResolved?.kind === "quoted" ? (
@@ -1130,32 +1167,48 @@ export default function PostCard({
                   ) : null}
                   {plainResolved.node.quoted_post ? (
                     <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                      <QuotedPostNest node={plainResolved.node.quoted_post} supabase={supabase} {...quoteNestExpandProps} />
+                      <QuotedPostNest
+                        node={plainResolved.node.quoted_post}
+                        supabase={supabase}
+                        threadRoot={post.original_post}
+                        {...quoteNestExpandProps}
+                      />
                     </div>
                   ) : (
                     <div className={QUOTED_BLOCK_FRAME_CLASS}>
-                      <QuotedPostNest node={plainResolved.node} supabase={supabase} {...quoteNestExpandProps} />
+                      <QuotedPostNest
+                        node={plainResolved.node}
+                        supabase={supabase}
+                        threadRoot={post.original_post}
+                        {...quoteNestExpandProps}
+                      />
                     </div>
                   )}
                 </>
               ) : null}
               {showFlatReblogFallback ? (
                 <>
-                  {fallbackBody.content ? (
-                    <LinkedPostText
-                      text={fallbackBody.content}
-                      className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
-                    />
-                  ) : null}
-                  <PostMediaGallery
-                    supabase={supabase}
-                    post={{
-                      image_url: fallbackBody.imageSrc,
-                      image_storage_path: fallbackBody.image_storage_path,
-                    }}
-                    variant="feed"
-                    wrapperClassName="mt-2.5"
-                  />
+                  {threadRootTombstoned ? (
+                    <OriginalPostDeleted className="mt-2.5" />
+                  ) : (
+                    <>
+                      {fallbackBody.content ? (
+                        <LinkedPostText
+                          text={fallbackBody.content}
+                          className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                        />
+                      ) : null}
+                      <PostMediaGallery
+                        supabase={supabase}
+                        post={{
+                          image_url: fallbackBody.imageSrc,
+                          image_storage_path: fallbackBody.image_storage_path,
+                        }}
+                        variant="feed"
+                        wrapperClassName="mt-2.5"
+                      />
+                    </>
+                  )}
                   <p className="mt-1.5 text-meta text-text-secondary">Quote chain could not be fully loaded.</p>
                 </>
               ) : null}
@@ -1200,7 +1253,12 @@ export default function PostCard({
                     </div>
                   ) : null}
                   <div className={QUOTE_REBLOG_QUOTED_INNER_CLASS}>
-                    <QuotedPostNest node={post.quoted_post} supabase={supabase} {...quoteNestExpandProps} />
+                    <QuotedPostNest
+                      node={post.quoted_post}
+                      supabase={supabase}
+                      threadRoot={post.original_post}
+                      {...quoteNestExpandProps}
+                    />
                   </div>
                 </div>
               ) : null}

@@ -3,6 +3,7 @@ import {
   postImagesFingerprint,
   type NormalizedPostImage,
 } from "@/lib/post-images";
+import { isPostTombstoned, isThreadRootTombstoned, type ThreadRootTombstoneRef } from "@/lib/post-tombstone";
 import { usernameLooksLikeEmail } from "@/lib/username";
 import type { EmbeddedPostWithAuthor, FeedPost, QuotedPostNode } from "@/types/post";
 import { unwrapEmbed } from "@/types/post";
@@ -245,6 +246,9 @@ export function bodyFromPost(row: FeedPost): {
   const root = chainRootEmbed(row);
 
   if (reblogOf && root) {
+    if (isPostTombstoned(root)) {
+      return { content: "", imageSrc: null, image_storage_path: null };
+    }
     return {
       content: root.content,
       imageSrc: root.image_url?.trim() || null,
@@ -288,6 +292,50 @@ export function quotedChainLeaf(node: QuotedPostNode | null): QuotedPostNode | n
   let n: QuotedPostNode = node;
   while (n.quoted_post) n = n.quoted_post;
   return n;
+}
+
+/**
+ * True when this quote-chain node (or its leaf) is the tombstoned thread root.
+ * Uses `deleted_at` on the node/leaf and falls back to merged `original_post` embed.
+ */
+export function quotedNodeShowsTombstonedSource(
+  node: QuotedPostNode,
+  threadRoot: ThreadRootTombstoneRef,
+): boolean {
+  if (isPostTombstoned(node)) return true;
+  const leaf = quotedChainLeaf(node);
+  if (leaf && isPostTombstoned(leaf)) return true;
+  if (threadRoot && leaf && leaf.id === threadRoot.id) return isThreadRootTombstoned(threadRoot);
+  if (threadRoot && node.id === threadRoot.id) return isThreadRootTombstoned(threadRoot);
+  return false;
+}
+
+/** Apply tombstone fields from merged thread root onto the matching node in a quoted chain. */
+export function patchQuotedPostChainTombstone(
+  node: QuotedPostNode | null,
+  threadRoot: { id: string; deleted_at?: string | null } | null,
+): QuotedPostNode | null {
+  if (!node || !threadRoot || !isPostTombstoned(threadRoot)) return node;
+  const deletedAt = threadRoot.deleted_at!.trim();
+  const rootId = threadRoot.id;
+
+  const walk = (n: QuotedPostNode): QuotedPostNode => {
+    const quoted = n.quoted_post ? walk(n.quoted_post) : null;
+    if (n.id !== rootId) {
+      return { ...n, quoted_post: quoted };
+    }
+    return {
+      ...n,
+      quoted_post: quoted,
+      deleted_at: deletedAt,
+      content: "",
+      image_url: null,
+      image_storage_path: null,
+      post_images: null,
+    };
+  };
+
+  return walk(node);
 }
 
 /**
@@ -441,10 +489,17 @@ function quotedPostNodeAddonOwnImages(node: QuotedPostNode): NormalizedPostImage
  * (author-owned add-on paths first, else full set when it differs from the quoted subtree leaf fingerprint).
  * Returns `null` for originals / leaf nodes (`reblog_of` empty).
  */
-export function quotedNestLayerOuterMedia(node: QuotedPostNode): NormalizedPostImage[] | null {
+export function quotedNestLayerOuterMedia(
+  node: QuotedPostNode,
+  threadRoot: ThreadRootTombstoneRef = null,
+): NormalizedPostImage[] | null {
   if (!node.reblog_of?.trim()) return null;
 
   const addon = quotedPostNodeAddonOwnImages(node);
+  if (isThreadRootTombstoned(threadRoot)) {
+    return addon.length > 0 ? addon : null;
+  }
+
   if (addon.length > 0) return addon;
 
   const mine = normalizePostImages(node);
@@ -557,6 +612,10 @@ export function postCardHeaderAttribution(post: FeedPost): PostCardHeaderAttribu
 export function quoteLayerOuterMedia(post: FeedPost): NormalizedPostImage[] | null {
   if (!hasQuoteReblogLayer(post)) return null;
   const addon = reblogAddonOwnImages(post);
+  if (isThreadRootTombstoned(post.original_post)) {
+    return addon.length > 0 ? addon : null;
+  }
+
   if (addon.length > 0) return addon;
 
   const mine = normalizePostImages(post);

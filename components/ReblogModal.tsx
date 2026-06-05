@@ -5,6 +5,7 @@ import type { FeedPost } from "@/types/post";
 import { ALLOWED_IMAGE_MIME_TYPES } from "@/lib/image-upload-validation";
 import { preparePostImageForUpload } from "@/lib/post-image-prep";
 import { bodyFromPost, quotedPostAuthorDisplay } from "@/lib/feed-post-display";
+import { isPostTombstoned, ORIGINAL_POST_DELETED_LABEL } from "@/lib/post-tombstone";
 import { parseCommaSeparatedTags } from "@/lib/tags";
 import { InlineErrorBanner } from "./InlineErrorBanner";
 
@@ -144,9 +145,13 @@ export default function ReblogModal({
 
   const sourceIsMature = post.is_nsfw === true;
   const quotedAuthor = quotedPostAuthorDisplay(post);
+  const rootTombstoned = isPostTombstoned(post.original_post);
   const { content: quotedPreview } = bodyFromPost(post);
-  const preview =
-    quotedPreview.length > 200 ? `${quotedPreview.slice(0, 200).trim()}…` : quotedPreview;
+  const preview = rootTombstoned
+    ? ORIGINAL_POST_DELETED_LABEL
+    : quotedPreview.length > 200
+      ? `${quotedPreview.slice(0, 200).trim()}…`
+      : quotedPreview;
 
   const dismissErrorIfNeeded = () => {
     if (errorMessage && onDismissError) onDismissError();
