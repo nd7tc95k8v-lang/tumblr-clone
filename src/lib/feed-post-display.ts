@@ -14,12 +14,56 @@ export function displayUsername(value: string | null | undefined): string {
   return u;
 }
 
-export function formatPostTime(iso: string) {
+/** Viewer device IANA timezone; falls back to locale default when resolution fails. */
+export function resolveViewerTimeZone(): string | undefined {
   try {
-    return new Date(iso).toLocaleString(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return typeof tz === "string" && tz.trim() ? tz.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withViewerTimeZone(
+  options: Intl.DateTimeFormatOptions,
+  timeZone: string | undefined,
+): Intl.DateTimeFormatOptions {
+  return timeZone ? { ...options, timeZone } : options;
+}
+
+/** `YYYY-MM-DD` calendar key in the viewer timezone (for "Yesterday" / weekday labels). */
+function calendarDateKey(epochMs: number, timeZone: string | undefined): string {
+  try {
+    return new Intl.DateTimeFormat(
+      "en-CA",
+      withViewerTimeZone({ year: "numeric", month: "2-digit", day: "2-digit" }, timeZone),
+    ).format(new Date(epochMs));
+  } catch {
+    const x = new Date(epochMs);
+    const y = x.getFullYear();
+    const m = String(x.getMonth() + 1).padStart(2, "0");
+    const d = String(x.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+}
+
+function countCalendarDaysBehind(olderMs: number, newerMs: number, timeZone: string | undefined): number {
+  const olderKey = calendarDateKey(olderMs, timeZone);
+  const newerKey = calendarDateKey(newerMs, timeZone);
+  const dayNumber = (key: string) => {
+    const [y, m, d] = key.split("-").map((part) => parseInt(part, 10));
+    return Math.floor(Date.UTC(y, m - 1, d) / 86400000);
+  };
+  return dayNumber(newerKey) - dayNumber(olderKey);
+}
+
+export function formatPostTime(iso: string) {
+  const timeZone = resolveViewerTimeZone();
+  try {
+    return new Date(iso).toLocaleString(
+      undefined,
+      withViewerTimeZone({ dateStyle: "medium", timeStyle: "short" }, timeZone),
+    );
   } catch {
     return iso;
   }
@@ -27,6 +71,7 @@ export function formatPostTime(iso: string) {
 
 /** Scan-friendly relative / compact labels; full stamp for `title` / `aria-label` (see `formatPostTime`). */
 export function formatRelativePostTime(iso: string): { label: string; full: string } {
+  const timeZone = resolveViewerTimeZone();
   const full = formatPostTime(iso);
   let d: Date;
   try {
@@ -44,21 +89,22 @@ export function formatRelativePostTime(iso: string): { label: string; full: stri
   if (sec < 3600) return { label: `${Math.floor(sec / 60)}m`, full };
   if (sec < 86400) return { label: `${Math.floor(sec / 3600)}h`, full };
 
-  const dayStartMs = (t: number) => {
-    const x = new Date(t);
-    x.setHours(0, 0, 0, 0);
-    return x.getTime();
-  };
-  const calendarDaysBehind = Math.round((dayStartMs(Date.now()) - dayStartMs(d.getTime())) / 86400000);
+  const calendarDaysBehind = countCalendarDaysBehind(d.getTime(), Date.now(), timeZone);
   if (calendarDaysBehind === 1) {
     return {
-      label: `Yesterday ${d.toLocaleTimeString(undefined, { timeStyle: "short" })}`,
+      label: `Yesterday ${d.toLocaleTimeString(
+        undefined,
+        withViewerTimeZone({ timeStyle: "short" }, timeZone),
+      )}`,
       full,
     };
   }
   if (calendarDaysBehind >= 2 && calendarDaysBehind < 7) {
     return {
-      label: d.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
+      label: d.toLocaleString(
+        undefined,
+        withViewerTimeZone({ weekday: "short", hour: "numeric", minute: "2-digit" }, timeZone),
+      ),
       full,
     };
   }
