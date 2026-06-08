@@ -18,6 +18,7 @@ export default function AuthForm({ supabase, onAuthChange }: Props) {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [signupSuccessEmail, setSignupSuccessEmail] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,9 +28,10 @@ export default function AuthForm({ supabase, onAuthChange }: Props) {
       if (mode === "signup") {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        setMessage(
-          "Check your email to confirm, or sign in if confirmations are disabled. After you sign in, you'll choose a username.",
-        );
+        const submittedEmail = email;
+        setEmail("");
+        setPassword("");
+        setSignupSuccessEmail(submittedEmail);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
@@ -41,6 +43,33 @@ export default function AuthForm({ supabase, onAuthChange }: Props) {
       setLoading(false);
     }
   };
+
+  if (signupSuccessEmail) {
+    return (
+      <div className="qrtz-card mx-auto flex w-full max-w-md flex-col gap-4">
+        <h2 className="font-heading text-lg font-semibold text-text">Check your email</h2>
+        <div className="flex flex-col gap-2 text-sm text-text-secondary">
+          <p className="text-success" role="status" aria-live="polite">
+            A verification email has been sent to{" "}
+            <span className="font-medium text-text">{signupSuccessEmail}</span>.
+          </p>
+          <p>Click the link in that email to verify your account.</p>
+          <p>After verification, you&apos;ll choose a username.</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setSignupSuccessEmail(null);
+            setMode("signin");
+            setMessage(null);
+          }}
+          className="qrtz-btn-primary px-4 py-2"
+        >
+          Back to sign in
+        </button>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -96,6 +125,7 @@ export default function AuthForm({ supabase, onAuthChange }: Props) {
         onClick={() => {
           setMode(mode === "signin" ? "signup" : "signin");
           setMessage(null);
+          setSignupSuccessEmail(null);
         }}
         className="text-sm text-link transition-colors hover:text-link-hover hover:underline"
       >
