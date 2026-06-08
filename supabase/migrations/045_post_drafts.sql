@@ -11,14 +11,7 @@ create table if not exists public.post_drafts (
   is_nsfw boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  constraint post_drafts_tags_max_count check (cardinality(tags) <= 30),
-  constraint post_drafts_tags_element_len check (
-    not exists (
-      select 1
-      from unnest(tags) as t(tag)
-      where char_length(tag) > 40
-    )
-  )
+  constraint post_drafts_tags_max_count check (cardinality(tags) <= 30)
 );
 
 create index if not exists post_drafts_user_updated_idx
