@@ -9,6 +9,7 @@ import ProfileUsernameLink from "./ProfileUsernameLink";
 import ThemeAppearanceSettings from "./ThemeAppearanceSettings";
 import ContentSafetySettings from "./ContentSafetySettings";
 import FollowedTagsSettings from "./FollowedTagsSettings";
+import QueueSettings from "./QueueSettings";
 
 function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -75,6 +76,12 @@ export default function SettingsClient() {
       {user ? (
         <SettingsSection title="Followed Tags">
           <FollowedTagsSettings supabase={supabase} user={user} />
+        </SettingsSection>
+      ) : null}
+
+      {user ? (
+        <SettingsSection title="Queue">
+          <QueueSettings supabase={supabase} user={user} />
         </SettingsSection>
       ) : null}
 

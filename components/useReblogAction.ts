@@ -3,7 +3,8 @@
 import { useCallback } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { resolveLikelyRateOrGuardFailureMessage } from "@/lib/action-guard/resolve-rate-or-guard-failure";
-import { buildOptimisticReblogFeedPost, reblogInsertFields } from "@/lib/reblog";
+import { publishReblogPost } from "@/lib/compose";
+import { buildOptimisticReblogFeedPost } from "@/lib/reblog";
 import type { FeedPost, PostAuthorEmbed } from "@/types/post";
 import { useActionGuard } from "./ActionGuardProvider";
 
@@ -76,11 +77,9 @@ export function useReblogAction(
 
       const reblogTags = tags ?? [];
       const isQuickReblog = commentary === null;
-      const attachImages = !isQuickReblog ? (images ?? []).slice(0, MAX_POST_IMAGES) : [];
 
       let succeeded = false;
       await runProtectedAction(supabase, { kind: "reblog" }, async () => {
-        let attachedImageStoragePaths: string[] | undefined;
         const newPostId = crypto.randomUUID();
         if (process.env.NODE_ENV === "development") {
           console.log("[reblog-action-entry]", {
@@ -88,111 +87,44 @@ export function useReblogAction(
             newPostId,
             isQuickReblog,
             rawImagesLength: images?.length ?? 0,
-            attachImagesLength: attachImages.length,
+            attachImagesLength: !isQuickReblog ? (images ?? []).slice(0, MAX_POST_IMAGES).length : 0,
             commentary,
             tagsLength: reblogTags.length,
           });
         }
-        const { error } = await supabase.from("posts").insert({
-          id: newPostId,
-          user_id: user.id,
-          ...reblogInsertFields(original, {
-            commentary,
-            tags: reblogTags,
-            editorMarksMature: commentary === null ? undefined : editorMarksMature,
-          }),
+
+        const result = await publishReblogPost({
+          supabase,
+          userId: user.id,
+          source: original,
+          postId: newPostId,
+          commentary,
+          tags: reblogTags,
+          editorMarksMature,
+          imageFiles: images,
         });
-        if (error) {
-          console.error(error);
-          reportError(await resolveLikelyRateOrGuardFailureMessage(supabase, error, { kind: "reblog" }));
-          return;
-        }
 
-        if (attachImages.length > 0) {
-          const uploadedPaths: string[] = [];
-          try {
-            // `post_images_copy_for_reblog` copies the chain root gallery onto this row; those rows must be removed
-            // before inserting uploader-owned paths. Plain client DELETE can match 0 rows when `posts` SELECT RLS hides
-            // the author's own NSFW row from the EXISTS subcheck on `post_images_delete_own_post` — use RPC first
-            // (migration 038 `clear_post_images_for_reblog_attachment`), then fall back to client delete.
-            const { error: rpcErr } = await supabase.rpc("clear_post_images_for_reblog_attachment", {
-              p_post_id: newPostId,
-            });
-            if (rpcErr) {
-              const { error: delCopyErr } = await supabase.from("post_images").delete().eq("post_id", newPostId);
-              if (delCopyErr) {
-                console.error(delCopyErr);
-                const m =
-                  delCopyErr.message?.trim() || delCopyErr.code || "Could not prepare image attachments.";
-                throw new Error(`Saving image records failed: ${m}`);
-              }
-            }
-            for (const selectedFile of attachImages) {
-              const rawExt = selectedFile.name.split(".").pop();
-              const fileExt =
-                rawExt && /^[a-z0-9]+$/i.test(rawExt) && rawExt.length <= 8 ? rawExt.toLowerCase() : "jpg";
-              const filePath = `${user.id}/${crypto.randomUUID()}.${fileExt}`;
-              const { error: uploadError } = await supabase.storage.from("post-images").upload(filePath, selectedFile, {
-                contentType: selectedFile.type || `image/${fileExt}`,
-                upsert: false,
-              });
-              if (uploadError) {
-                console.error(uploadError);
-                const m = uploadError.message?.trim() || "Image upload failed.";
-                throw new Error(`Image upload failed: ${m}`);
-              }
-              uploadedPaths.push(filePath);
-            }
-
-            const { error: piError } = await supabase.from("post_images").insert(
-              uploadedPaths.map((storage_path, position) => ({
-                post_id: newPostId,
-                storage_path,
-                position,
-              })),
-            );
-            if (piError) {
-              console.error(piError);
-              const m = piError.message?.trim() || piError.code || "Could not save image attachments.";
-              throw new Error(`Saving image records failed: ${m}`);
-            }
-
-            const { error: updError } = await supabase
-              .from("posts")
-              .update({ image_storage_path: uploadedPaths[0] })
-              .eq("id", newPostId);
-            if (updError) {
-              console.error(updError);
-              const m = updError.message?.trim() || updError.code || "Could not link primary image.";
-              throw new Error(`Linking primary image failed: ${m}`);
-            }
-            attachedImageStoragePaths = uploadedPaths;
-          } catch (err: unknown) {
-            for (const p of uploadedPaths) {
-              const { error: rmErr } = await supabase.storage.from("post-images").remove([p]);
-              if (rmErr) console.error("Reblog images rollback: storage remove failed", rmErr);
-            }
-            const { error: delErr } = await supabase.from("posts").delete().eq("id", newPostId);
-            if (delErr) console.error("Reblog images rollback: post delete failed", delErr);
-            const msg =
-              err instanceof Error && err.message.trim()
-                ? err.message.trim()
-                : "Could not attach photos to this reblog.";
-            reportError(msg);
-            return;
+        if (!result.ok) {
+          if (result.stage === "post_insert") {
+            reportError(await resolveLikelyRateOrGuardFailureMessage(supabase, result.error, { kind: "reblog" }));
+          } else {
+            reportError(result.message.trim() || "Could not attach photos to this reblog.");
           }
+          return;
         }
 
         succeeded = true;
         const optimistic = buildOptimisticReblogFeedPost({
-          newId: newPostId,
+          newId: result.postId,
           viewerUserId: user.id,
           viewerAuthor: getViewerAuthor?.() ?? null,
           source: original,
           commentary,
           tags: reblogTags,
           editorMarksMature: commentary === null ? undefined : editorMarksMature,
-          attachedImageStoragePaths,
+          attachedImageStoragePaths: result.attachedImageStoragePaths
+            ? [...result.attachedImageStoragePaths]
+            : undefined,
         });
         await onOptimisticFeedPost?.(optimistic);
         await onSuccess();

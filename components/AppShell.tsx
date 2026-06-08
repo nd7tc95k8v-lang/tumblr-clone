@@ -287,6 +287,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         match: (p) => p.startsWith("/profile/"),
       },
       { href: "/settings", label: "Settings", match: (p) => p === "/settings" },
+      { href: "/drafts", label: "Drafts", match: (p) => p === "/drafts" },
+      { href: "/queue", label: "Queue", match: (p) => p === "/queue" },
     ],
     [profileHref, unreadNotifCount],
   );
