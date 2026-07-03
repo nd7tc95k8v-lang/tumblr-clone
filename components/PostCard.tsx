@@ -549,6 +549,7 @@ export default function PostCard({
   const commentary = post.reblog_commentary?.trim() || null;
   const threadRootTombstoned = isThreadRootTombstoned(post.original_post);
   const quoteOuterMedia = quoteLayerOuterMedia(post);
+  const topLevelHasImages = !isReblog && buildMediaSlotsFromPost(post).length > 0;
   const showNestedQuote = Boolean(quoteLayer && post.quoted_post);
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
   const effectiveNsfwFeedMode = nsfwFeedMode ?? DEFAULT_NSFW_FEED_MODE;
@@ -1121,13 +1122,23 @@ export default function PostCard({
                 />
               ) : null}
               {!isReblog ? (
-                <>
-                  <LinkedPostText
-                    text={post.content}
-                    className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
-                  />
-                  <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-2.5" />
-                </>
+                topLevelHasImages ? (
+                  <>
+                    <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-2.5" />
+                    <LinkedPostText
+                      text={post.content}
+                      className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <LinkedPostText
+                      text={post.content}
+                      className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                    />
+                    <PostMediaGallery supabase={supabase} post={post} variant="feed" wrapperClassName="mt-2.5" />
+                  </>
+                )
               ) : null}
               {plainResolved?.kind === "flat" ? (
                 <>
