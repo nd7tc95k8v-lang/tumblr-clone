@@ -188,11 +188,8 @@ const ACTION_TEXT_MOBILE = "max-md:text-[0.6875rem] max-md:font-normal max-md:le
 /** Calmer secondary actions (notes / reblog / quote / owner menu trigger). */
 const REBLOG_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE} max-md:text-text-secondary/90`;
 
-/** Main reblog control: opens editor (commentary + tags). */
-const REBLOG_EDITOR_PRIMARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT}`;
-
-/** Fast reshare: same ritual, no editor — matches other footer actions at rest. */
-const REBLOG_INSTANT_SECONDARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT}`;
+/** Footer action row: neutral default at all breakpoints (Like uses its own liked-state colors). */
+const FOOTER_SECONDARY_ACTION_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT}`;
 
 /** Like control: same hit/text tuning; color still from liked / muted state. */
 const LIKE_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE}`;
@@ -1399,7 +1396,7 @@ export default function PostCard({
                       setQuickReblogError(null);
                       setReblogModalPost(post);
                     }}
-                    className={`${REBLOG_EDITOR_PRIMARY_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
+                    className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
                       reblogModalBusy
                         ? "cursor-wait border-border/45 bg-bg-secondary/50 opacity-95 ring-1 ring-border/40"
                         : "cursor-pointer"
@@ -1412,7 +1409,7 @@ export default function PostCard({
                     }
                     title="Reblog to your blog; add optional commentary and tags"
                   >
-                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
                       <QuoteBubbleIcon className={ICON_BOX} />
                     </span>
                     <span className="hidden sm:inline">{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
@@ -1427,7 +1424,7 @@ export default function PostCard({
                         onError: (msg) => setQuickReblogError(msg),
                       });
                     }}
-                    className={`${REBLOG_INSTANT_SECONDARY_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
+                    className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
                       rebloggingId === post.id
                         ? "cursor-wait bg-bg-secondary/40 opacity-90 ring-1 ring-border/35"
                         : "cursor-pointer"
@@ -1440,7 +1437,7 @@ export default function PostCard({
                     }
                     title="Instant reblog without opening the editor"
                   >
-                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
                       <RepostStatIcon className={ICON_BOX} />
                     </span>
                     <span className="hidden sm:inline">{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
@@ -1456,7 +1453,7 @@ export default function PostCard({
                   setNotesModalFocusComposer(true);
                   setNotesModalOpen(true);
                 }}
-                className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] shrink-0 touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
+                className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
                 aria-haspopup="dialog"
                 aria-expanded={notesModalOpen}
                 aria-label="Leave a short note on this thread"
@@ -1471,7 +1468,7 @@ export default function PostCard({
               {!hidePermalink ? (
                 <Link
                   href={postPermalinkPath(post.id)}
-                  className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] shrink-0 text-text-secondary/90 underline-offset-2 hover:bg-bg-secondary/60 hover:text-link hover:underline max-md:text-[0.6875rem]`}
+                  className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 text-text-secondary/90 underline-offset-2 hover:bg-bg-secondary/60 hover:text-link hover:underline max-md:text-[0.6875rem]`}
                   title="Open post page (shareable link)"
                   aria-label="Open post permalink"
                   prefetch={false}
@@ -1489,7 +1486,7 @@ export default function PostCard({
                     <button
                       ref={ownerMenuButtonRef}
                       type="button"
-                      className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} min-h-[2rem] ${
+                      className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] ${
                         ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
                       }`}
                       aria-label="Post options"
