@@ -10,6 +10,7 @@ import ThemeAppearanceSettings from "./ThemeAppearanceSettings";
 import ContentSafetySettings from "./ContentSafetySettings";
 import FollowedTagsSettings from "./FollowedTagsSettings";
 import QueueSettings from "./QueueSettings";
+import { LEGAL_POLICY_LINKS } from "./LegalLinksFooter";
 
 function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -140,6 +141,20 @@ export default function SettingsClient() {
             to sign in.
           </p>
         )}
+      </SettingsSection>
+
+      <SettingsSection title="Legal">
+        <nav className="flex flex-col gap-2" aria-label="Legal policies">
+          {LEGAL_POLICY_LINKS.map(({ href, label }) => (
+            <Link
+              key={href}
+              href={href}
+              className="w-fit text-sm font-medium text-link transition-colors hover:text-link-hover hover:underline"
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
       </SettingsSection>
     </div>
   );

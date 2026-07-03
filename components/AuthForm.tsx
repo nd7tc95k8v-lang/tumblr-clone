@@ -113,6 +113,25 @@ export default function AuthForm({ supabase, onAuthChange }: Props) {
       {message && (
         <p className="text-sm text-warning">{message}</p>
       )}
+      {mode === "signup" ? (
+        <p className="text-meta text-text-muted">
+          By signing up, you agree to the{" "}
+          <Link
+            href="/terms"
+            className="text-link transition-colors hover:text-link-hover hover:underline"
+          >
+            Terms
+          </Link>{" "}
+          and acknowledge the{" "}
+          <Link
+            href="/privacy"
+            className="text-link transition-colors hover:text-link-hover hover:underline"
+          >
+            Privacy Policy
+          </Link>
+          .
+        </p>
+      ) : null}
       <button
         type="submit"
         disabled={loading}

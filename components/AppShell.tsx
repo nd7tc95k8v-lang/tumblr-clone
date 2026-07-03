@@ -10,6 +10,7 @@ import { clearPostImageSignedUrlCache } from "@/lib/supabase/post-image-url-cach
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { normalizeUsername } from "@/lib/username";
 import AdultAccessExpiryNotice from "./AdultAccessExpiryNotice";
+import LegalLinksFooter from "./LegalLinksFooter";
 import SidebarAccount from "./SidebarAccount";
 
 const SPLASH_SLOGANS = [
@@ -491,7 +492,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           ) : null}
           <div className="flex-1 min-h-0">{children}</div>
           <footer className="shrink-0 border-t border-border px-4 py-4 text-center text-meta text-text-muted">
-            © 2026 {APP_NAME}
+            <p>© 2026 {APP_NAME}</p>
+            <LegalLinksFooter />
           </footer>
         </main>
       </div>

@@ -1,0 +1,56 @@
+[33me45bacc[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Polish mobile quote reblog layout
+[33m8b89169[m Refine mobile post density and media ordering
+[33m7d66267[m Fix mobile full-bleed feed media
+[33m26f24ee[m Make mobile feed edge-to-edge
+[33m8cdf0c5[m Use daily cron schedule for Hobby plan
+[33m64e76fd[m Trigger deployment after Vercel reconnect
+[33m07cb7e2[m Trigger Vercel deployment
+[33m01dcc75[m Add drafts queue and scheduler infrastructure
+[33m948ff0e[m Add drafts queue and scheduled publishing infrastructure
+[33mc1584c3[m feat: improve signup verification success state
+[33me755c66[m feat: add Resend email infrastructure
+[33m9557fb5[m feat: test add Resend email infrastructure
+[33me9ac84f[m Fix tombstoned original rendering in reblog chains
+[33m462dc0d[m Fix delete_own_post return type migration
+[33m0091b23[m Parse offsetless post timestamps as UTC
+[33m88f319b[m Fix post timestamps to use viewer timezone
+[33mf9fa744[m feat: improve core UX and account flows
+[33m7af5039[m post loading, password reset
+[33m6498412[m Likes notes are anchored to author
+[33mabda352[m Add swipe carousel for multi-image posts
+[33mfec5076[m Fix quote reblog ordering and attachment media handling
+[33m40b341b[m Fix quote reblog chain order and nested media
+[33m9d0622e[m Refine notes UX, NSFW handling, and feed behavior
+[33m81cada7[m Edit menu padding fix
+[33m4666365[m Respect NSFW feed mode on profile posts
+[33ma77b622[m Refine note comment timeline copy
+[33mc601120[m Respect NSFW feed preference on tag pages
+[33m8e5cc8a[m Fix PostCard owner menu clipping with fixed-position popover
+[33m77867b5[m Keep post tag overflow toggle inline
+[33ma039680[m Clarify thread-root vs future card engagement ownership
+[33m6b807ea[m Refactor PostCard footer into notes-first responsive action layout
+[33me755813[m Polish feed + post UX: reblog revised, comment icons
+[33m9dfbac1[m Polish feed + post UX: reblog revised, author notifications
+[33mddd90a5[m Polish feed + post UX: mobile tag chips, safer owner modals, improved error handling, and media flow stability
+[33me0f93a7[m feat: add notes to posts
+[33m79ba9dc[m feat: enhance mobile splash with larger branding and animated slogan
+[33m563ad7e[m refactor: refine mobile splash branding scale and typography
+[33mb1b5a47[m fix: fix AppShell timer typing for production buil
+[33meeb01c4[m mobile splash screen with randomized slogan, fix: respect NSFW default in composer and simplify NSFW UI
+[33mc821be9[m fix NSFW checkbox showing up if selected all posts as NSFW
+[33md4b4185[m remove wording in mobile, change wording on homefeed
+[33m20839df[m add owner edit and delete flows for posts, reblogs, and quote reblogs
+[33ma977d5a[m added search to mobile
+[33m92e61f4[m tag follow, settings changes, home feed incl tag follows
+[33m1f6afec[m many UX improvements
+[33m8fec802[m harden Supabase migrations for replay and null-safe original_post_id
+[33mac36fa8[m baseline Supabase schema and harden replay-safe RLS migrations
+[33me21aa7b[m photo upload issue
+[33mbe4613d[m Add mobile formatting
+[33mee5db8e[m Add desktop formatting, multi-image posts, signout move
+[33ma6c09ad[m Add name change, color, branding
+[33mbe62943[m Add profiles, usernames, reblogs, and follows
+[33mc7966e9[m Add nav, quotes, settings, and profile setup
+[33m7c5c05b[m Add profiles, usernames, reblogs, and follows
+[33m339fcc9[m first commit
+[33m14803f3[m initial commit
