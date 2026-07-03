@@ -1332,7 +1332,7 @@ export default function PostCard({
                   setNotesModalFocusComposer(false);
                   setNotesModalOpen(true);
                 }}
-                className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none text-left disabled:pointer-events-none disabled:opacity-45`}
+                className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none text-left font-normal text-text-muted max-md:text-text-muted/90 disabled:pointer-events-none disabled:opacity-45`}
                 aria-haspopup="dialog"
                 aria-expanded={notesModalOpen}
                 aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
@@ -1344,7 +1344,7 @@ export default function PostCard({
               </button>
               {showNsfwUnGatedBadge ? (
                 <span
-                  className="shrink-0 rounded-full border border-border/60 bg-bg-secondary/65 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-wide text-text-muted dark:border-border/50 dark:bg-bg-secondary/80"
+                  className="shrink-0 rounded-full border border-border/60 bg-bg-secondary/65 px-2 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-text-muted/90 dark:border-border/50 dark:bg-bg-secondary/80"
                   title="Mature content"
                   aria-label="Mature content (NSFW)"
                 >
@@ -1355,7 +1355,7 @@ export default function PostCard({
                 dateTime={post.created_at}
                 title={postTime.full}
                 aria-label={postTime.full}
-                className="ml-auto max-w-[11rem] shrink-0 truncate text-right text-meta font-medium tabular-nums tracking-tight text-text-secondary max-md:max-w-[9.25rem] max-md:text-[0.6875rem] max-md:tracking-normal"
+                className="ml-auto max-w-[11rem] shrink-0 truncate text-right text-meta font-normal tabular-nums tracking-tight text-text-muted max-md:max-w-[9.25rem] max-md:text-[0.6875rem] max-md:tracking-normal max-md:text-text-muted/95"
               >
                 {postTime.label}
               </time>
