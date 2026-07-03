@@ -41,7 +41,7 @@ import { useActionGuard } from "./ActionGuardProvider";
 import { usePostLikeToggle } from "./usePostLikeToggle";
 import type { ReblogActionHandler } from "./useReblogAction";
 
-const ICON_BOX = "h-4 w-4 shrink-0 transition-[transform,opacity] duration-200 ease-out";
+const ICON_BOX = "h-6 w-6 shrink-0 transition-[transform,opacity] duration-200 ease-out";
 
 function HeartIcon({ active, className }: { active: boolean; className?: string }) {
   const svgClass = [className, "transition-[fill,stroke,opacity] duration-200 ease-out"].filter(Boolean).join(" ");
@@ -188,11 +188,11 @@ const ACTION_TEXT_MOBILE = "max-md:text-[0.6875rem] max-md:font-normal max-md:le
 /** Calmer secondary actions (notes / reblog / quote / owner menu trigger). */
 const REBLOG_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE} max-md:text-text-secondary/90`;
 
-/** Main reblog control: opens editor (commentary + tags) — reads as the default Tumblr-style path. */
-const REBLOG_EDITOR_PRIMARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} border border-border/55 bg-bg-secondary/55 font-semibold text-text shadow-sm hover:border-border/70 hover:bg-bg-secondary/75 hover:text-text max-md:border-border/50`;
+/** Main reblog control: opens editor (commentary + tags). */
+const REBLOG_EDITOR_PRIMARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT}`;
 
-/** Fast reshare: same ritual, no editor — visually lighter than {@link REBLOG_EDITOR_PRIMARY_CLASS}. */
-const REBLOG_INSTANT_SECONDARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} font-normal text-text-secondary/80 opacity-95 hover:text-text-secondary hover:bg-bg-secondary/45`;
+/** Fast reshare: same ritual, no editor — matches other footer actions at rest. */
+const REBLOG_INSTANT_SECONDARY_CLASS = `${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT}`;
 
 /** Like control: same hit/text tuning; color still from liked / muted state. */
 const LIKE_ACTION_ROW_COMPACT = `${ACTION_HIT_MOBILE} ${ACTION_TEXT_MOBILE}`;
@@ -1377,7 +1377,7 @@ export default function PostCard({
                 title={currentUserId ? undefined : "Sign in to like"}
               >
                 <span
-                  className={`inline-flex h-4 w-4 shrink-0 origin-center items-center justify-center will-change-transform ${
+                  className={`inline-flex h-6 w-6 shrink-0 origin-center items-center justify-center will-change-transform ${
                     liked
                       ? "scale-110 transition-transform duration-200 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
                       : "scale-100 transition-transform duration-200 ease-out"
@@ -1412,7 +1412,7 @@ export default function PostCard({
                     }
                     title="Reblog to your blog; add optional commentary and tags"
                   >
-                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
                       <QuoteBubbleIcon className={ICON_BOX} />
                     </span>
                     <span className="hidden sm:inline">{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
@@ -1440,7 +1440,7 @@ export default function PostCard({
                     }
                     title="Instant reblog without opening the editor"
                   >
-                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden>
+                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center" aria-hidden>
                       <RepostStatIcon className={ICON_BOX} />
                     </span>
                     <span className="hidden sm:inline">{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
@@ -1462,7 +1462,7 @@ export default function PostCard({
                 aria-label="Leave a short note on this thread"
                 title={!supabase ? "Notes unavailable" : "Leave a short note — opens Notes with the composer ready"}
               >
-                <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
                   <ShortNoteComposeIcon className={ICON_BOX} />
                 </span>
                 <span className="hidden sm:inline">Note</span>
@@ -1476,7 +1476,7 @@ export default function PostCard({
                   aria-label="Open post permalink"
                   prefetch={false}
                 >
-                  <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
                     <PermalinkChainIcon className={ICON_BOX} />
                   </span>
                   <span className="hidden sm:inline">Link</span>
@@ -1503,7 +1503,7 @@ export default function PostCard({
                     >
                       <span
                         aria-hidden
-                        className="text-lg leading-none tracking-tight max-md:text-base max-md:text-text-secondary/85"
+                        className="text-[1.6875rem] leading-none tracking-tight max-md:text-text-secondary/85"
                       >
                         ⋯
                       </span>
