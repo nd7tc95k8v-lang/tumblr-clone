@@ -17,6 +17,8 @@ type Props = {
   post?: PostWithImages;
   variant?: "feed" | "quoted";
   wrapperClassName?: string;
+  /** When set, replaces the default variant image class (e.g. edge-to-edge top-level feed media). */
+  imageClassName?: string;
 };
 
 function focusRing(): string {
@@ -29,6 +31,7 @@ export default function PostMediaGallery({
   post,
   variant = "feed",
   wrapperClassName = "",
+  imageClassName,
 }: Props) {
   if (post && isPostTombstoned(post as { deleted_at?: string | null })) {
     return null;
@@ -43,7 +46,10 @@ export default function PostMediaGallery({
   const onGallerySignedUrl = useCallback((path: string, url: string) => {
     signedUrlByPathRef.current.set(path, url);
   }, []);
-  const imgClass = variant === "quoted" ? nestImgClass : feedImgClass;
+  const imgClass = imageClassName ?? (variant === "quoted" ? nestImgClass : feedImgClass);
+  const carouselScrollerClass = imageClassName
+    ? "flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain rounded-none [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    : "flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain rounded-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden";
 
   if (images.length === 0) return null;
 
@@ -96,6 +102,7 @@ export default function PostMediaGallery({
         supabase={supabase}
         imgClass={imgClass}
         wrapperClassName={wrapperClassName}
+        carouselScrollerClass={carouselScrollerClass}
         openAt={openAt}
         onSignedUrl={onGallerySignedUrl}
       />
@@ -109,6 +116,7 @@ function PostMediaCarousel({
   supabase,
   imgClass,
   wrapperClassName,
+  carouselScrollerClass,
   openAt,
   onSignedUrl,
 }: {
@@ -116,6 +124,7 @@ function PostMediaCarousel({
   supabase: SupabaseClient | null;
   imgClass: string;
   wrapperClassName: string;
+  carouselScrollerClass: string;
   openAt: (i: number) => void;
   onSignedUrl: (path: string, url: string) => void;
 }) {
@@ -143,7 +152,7 @@ function PostMediaCarousel({
         role="group"
         aria-roledescription="carousel"
         aria-label={`Image gallery, ${images.length} images`}
-        className="flex w-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain rounded-xl [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className={carouselScrollerClass}
       >
         {images.map((im, i) => (
           <div key={`${im.storagePath ?? ""}-${im.src ?? ""}-${i}`} className="w-full shrink-0 snap-center">

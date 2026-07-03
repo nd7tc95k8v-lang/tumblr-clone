@@ -176,6 +176,20 @@ const QUOTE_REBLOG_ADDON_CLASS =
 /** Matches {@link QuotedPostNest} layer row — avatar + content column. */
 const QUOTE_REBLOG_LATEST_LAYER_ROW_CLASS = "flex gap-1.5 sm:gap-2";
 
+/** Matches `ProfileAvatar` md — aligns text column with the header row below full-width media. */
+const TOP_LEVEL_ORIGINAL_AVATAR_SPACER_CLASS = "h-10 w-10 shrink-0";
+
+/**
+ * Top-level original post media: cancels article horizontal padding only (`max-md:p-3`, `qrtz-card` p-4)
+ * so the gallery aligns with the card inner border edges without overlapping the avatar row.
+ */
+const TOP_LEVEL_ORIGINAL_MEDIA_WRAPPER_CLASS =
+  "block max-w-none -mx-3 w-[calc(100%+1.5rem)] md:-mx-4 md:w-[calc(100%+2rem)]";
+
+/** Full card-width feed media: no object-contain letterboxing; square corners flush with card edges. */
+const TOP_LEVEL_ORIGINAL_MEDIA_IMG_CLASS =
+  "block h-auto w-full max-h-[70vh] cursor-zoom-in rounded-none";
+
 const REBLOG_ACTION_CLASS =
   "inline-flex min-h-[1.75rem] min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-meta font-medium text-text-secondary transition-[color,background-color,transform,box-shadow] duration-200 ease-out hover:text-link hover:bg-bg-secondary/60 active:scale-[0.97] active:bg-bg-secondary/75 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/60 focus-visible:ring-offset-0 disabled:pointer-events-none disabled:opacity-50";
 
@@ -550,6 +564,7 @@ export default function PostCard({
   const threadRootTombstoned = isThreadRootTombstoned(post.original_post);
   const quoteOuterMedia = quoteLayerOuterMedia(post);
   const topLevelHasImages = !isReblog && buildMediaSlotsFromPost(post).length > 0;
+  const useTopLevelOriginalImageLayout = topLevelHasImages;
   const showNestedQuote = Boolean(quoteLayer && post.quoted_post);
   const showFlatReblogFallback = Boolean(isReblog && !post.quoted_post);
   const effectiveNsfwFeedMode = nsfwFeedMode ?? DEFAULT_NSFW_FEED_MODE;
@@ -1047,8 +1062,423 @@ export default function PostCard({
   const notesTriggerTotal =
     Math.max(0, likeCount) + Math.max(0, reblogCount) + effectiveNoteCommentCount;
 
+  const postCardTail = (
+    <>
+      {tags.length > 0 ? (
+        <ul className="mt-2.5 max-md:mt-2 flex list-none flex-nowrap items-start gap-x-1.5 gap-y-0 max-md:gap-x-1 p-0">
+          <li className="min-w-0 flex-1">
+            <div
+              ref={tagsClipRef}
+              className={
+                tagsExpanded
+                  ? undefined
+                  : "overflow-hidden max-h-[2.375rem] md:max-h-[2.125rem]"
+              }
+            >
+              <ul className="flex list-none flex-wrap gap-1.5 max-md:gap-1 p-0">
+                {tags.map((t) => (
+                  <li key={t}>
+                    <Link
+                      href={`/tag/${encodeURIComponent(t)}`}
+                      className={`${TAG_CHIP_BASE} ${TAG_CHIP_MOBILE_SHELL} ${
+                        highlightSet?.has(t)
+                          ? `${TAG_CHIP_HIGHLIGHT} ${TAG_CHIP_HIGHLIGHT_MOBILE_SOFT}`
+                          : `${TAG_CHIP_DEFAULT} ${TAG_CHIP_DEFAULT_MOBILE_SOFT}`
+                      }`}
+                    >
+                      #{t}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </li>
+          {tagsOverflowing || tagsExpanded ? (
+            <li className="inline-flex shrink-0 items-center self-start pt-px max-md:pt-0.5">
+              <button
+                type="button"
+                onClick={() => setTagsExpanded((v) => !v)}
+                className="inline-flex min-h-[1.5rem] max-md:min-h-[1.75rem] items-center rounded-full border border-transparent px-2 py-0.5 max-md:px-1.5 max-md:py-px text-meta font-medium leading-snug text-text-secondary/90 underline-offset-2 transition-[color,background-color,border-color] duration-200 ease-out hover:border-border/50 hover:bg-bg-secondary/45 hover:text-link focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 max-md:text-[0.6875rem] max-md:font-normal max-md:leading-snug"
+                aria-expanded={tagsExpanded}
+              >
+                {tagsExpanded ? "Show less" : "Show more"}
+              </button>
+            </li>
+          ) : null}
+        </ul>
+      ) : null}
+      <InlineErrorBanner
+        message={likeError}
+        onDismiss={dismissLikeError}
+        className="mt-2.5"
+      />
+      <InlineErrorBanner
+        message={deleteError}
+        onDismiss={() => setDeleteError(null)}
+        className="mt-2.5"
+      />
+      <InlineErrorBanner
+        message={quickReblogError}
+        onDismiss={() => setQuickReblogError(null)}
+        className="mt-2.5"
+      />
+      <div className="mt-2.5 border-t border-border/45 pt-2.5 sm:mt-3 sm:pt-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            disabled={!supabase}
+            onClick={() => {
+              setNotesModalShowComposer(false);
+              setNotesModalFocusComposer(false);
+              setNotesModalOpen(true);
+            }}
+            className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none text-left font-normal text-text-muted max-md:text-text-muted/90 disabled:pointer-events-none disabled:opacity-45`}
+            aria-haspopup="dialog"
+            aria-expanded={notesModalOpen}
+            aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
+            title={!supabase ? "Notes unavailable" : undefined}
+          >
+            <span className="tabular-nums">
+              {notesTriggerTotal} {notesTriggerTotal === 1 ? "note" : "notes"}
+            </span>
+          </button>
+          {showNsfwUnGatedBadge ? (
+            <span
+              className="shrink-0 rounded-full border border-border/60 bg-bg-secondary/65 px-2 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-text-muted/90 dark:border-border/50 dark:bg-bg-secondary/80"
+              title="Mature content"
+              aria-label="Mature content (NSFW)"
+            >
+              NSFW
+            </span>
+          ) : null}
+          <time
+            dateTime={post.created_at}
+            title={postTime.full}
+            aria-label={postTime.full}
+            className="ml-auto max-w-[11rem] shrink-0 truncate text-right text-meta font-normal tabular-nums tracking-tight text-text-muted max-md:max-w-[9.25rem] max-md:text-[0.6875rem] max-md:tracking-normal max-md:text-text-muted/95"
+          >
+            {postTime.label}
+          </time>
+        </div>
+
+        <div className={FOOTER_ACTIONS_ROW}>
+          <button
+            type="button"
+            disabled={!currentUserId || likeBusy}
+            onClick={() => void toggleLike()}
+            className={`inline-flex min-h-[2rem] min-w-0 shrink-0 touch-manipulation select-none items-center justify-center gap-1.5 rounded-md px-2 py-1 text-meta font-medium transition-[color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 active:scale-95 disabled:pointer-events-none ${LIKE_ACTION_ROW_COMPACT} ${
+              !currentUserId ? "cursor-not-allowed disabled:opacity-45" : "disabled:opacity-100"
+            } ${likeBusy ? "cursor-wait" : currentUserId ? "cursor-pointer" : ""} ${
+              liked ? "text-accent-pink" : "text-text-secondary hover:text-text"
+            }`}
+            aria-pressed={liked}
+            aria-busy={likeBusy}
+            aria-label={currentUserId ? (liked ? "Unlike" : "Like") : "Sign in to like"}
+            title={currentUserId ? undefined : "Sign in to like"}
+          >
+            <span
+              className={`inline-flex h-6 w-6 shrink-0 origin-center items-center justify-center will-change-transform ${
+                liked
+                  ? "scale-110 transition-transform duration-200 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
+                  : "scale-100 transition-transform duration-200 ease-out"
+              }`}
+              aria-hidden
+            >
+              <HeartIcon active={liked} className={ICON_BOX} />
+            </span>
+            <span className="hidden sm:inline">{liked ? "Unlike" : "Like"}</span>
+          </button>
+
+          {showReblog ? (
+            <>
+              <button
+                type="button"
+                disabled={rebloggingId !== null || reblogModalBusy}
+                onClick={() => {
+                  setReblogModalError(null);
+                  setQuickReblogError(null);
+                  setReblogModalPost(post);
+                }}
+                className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
+                  reblogModalBusy
+                    ? "cursor-wait border-border/45 bg-bg-secondary/50 opacity-95 ring-1 ring-border/40"
+                    : "cursor-pointer"
+                }`}
+                aria-busy={reblogModalBusy}
+                aria-label={
+                  reblogModalBusy
+                    ? "Publishing reblog with commentary or tags"
+                    : "Reblog — add optional commentary and tags"
+                }
+                title="Reblog to your blog; add optional commentary and tags"
+              >
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                  <QuoteBubbleIcon className={ICON_BOX} />
+                </span>
+                <span className="hidden sm:inline">{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
+              </button>
+              <button
+                type="button"
+                disabled={rebloggingId !== null || reblogModalBusy}
+                onClick={() => {
+                  setQuickReblogError(null);
+                  setReblogModalError(null);
+                  void onReblog(post, null, undefined, undefined, undefined, {
+                    onError: (msg) => setQuickReblogError(msg),
+                  });
+                }}
+                className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
+                  rebloggingId === post.id
+                    ? "cursor-wait bg-bg-secondary/40 opacity-90 ring-1 ring-border/35"
+                    : "cursor-pointer"
+                }`}
+                aria-busy={rebloggingId === post.id}
+                aria-label={
+                  rebloggingId === post.id
+                    ? "Instant reblogging, no commentary or tags"
+                    : "Instant reblog — skip editor, no commentary or tags"
+                }
+                title="Instant reblog without opening the editor"
+              >
+                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                  <RepostStatIcon className={ICON_BOX} />
+                </span>
+                <span className="hidden sm:inline">{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
+              </button>
+            </>
+          ) : null}
+
+          <button
+            type="button"
+            disabled={!supabase}
+            onClick={() => {
+              setNotesModalShowComposer(true);
+              setNotesModalFocusComposer(true);
+              setNotesModalOpen(true);
+            }}
+            className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
+            aria-haspopup="dialog"
+            aria-expanded={notesModalOpen}
+            aria-label="Leave a short note on this thread"
+            title={!supabase ? "Notes unavailable" : "Leave a short note — opens Notes with the composer ready"}
+          >
+            <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+              <ShortNoteComposeIcon className={ICON_BOX} />
+            </span>
+            <span className="hidden sm:inline">Note</span>
+          </button>
+
+          {!hidePermalink ? (
+            <Link
+              href={postPermalinkPath(post.id)}
+              className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 text-text-secondary/90 underline-offset-2 hover:bg-bg-secondary/60 hover:text-link hover:underline max-md:text-[0.6875rem]`}
+              title="Open post page (shareable link)"
+              aria-label="Open post permalink"
+              prefetch={false}
+            >
+              <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
+                <PermalinkChainIcon className={ICON_BOX} />
+              </span>
+              <span className="hidden sm:inline">Link</span>
+            </Link>
+          ) : null}
+
+          {isOwner ? (
+            <div className="ml-auto shrink-0">
+              <div className={`${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}>
+                <button
+                  ref={ownerMenuButtonRef}
+                  type="button"
+                  className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] ${
+                    ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
+                  }`}
+                  aria-label="Post options"
+                  aria-busy={ownerActionBusy}
+                  aria-haspopup="menu"
+                  aria-expanded={ownerMenuOpen}
+                  onClick={() => {
+                    if (ownerActionBusy) return;
+                    setOwnerMenuOpen((v) => !v);
+                  }}
+                >
+                  <span
+                    aria-hidden
+                    className="text-[1.6875rem] leading-none tracking-tight max-md:text-text-secondary/85"
+                  >
+                    ⋯
+                  </span>
+                </button>
+              </div>
+              {ownerMenuOpen && ownerMenuPos ? (
+                <div
+                  ref={ownerMenuPopoverRef}
+                  role="menu"
+                  className="fixed z-10 w-40 max-w-[calc(100vw-1rem)] -translate-x-full rounded-md border border-border/60 bg-bg-secondary py-0.5 shadow-md"
+                  style={{ top: ownerMenuPos.top, left: ownerMenuPos.left }}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={ownerActionBusy || !supabase}
+                    className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                    onClick={handleOpenEditTags}
+                  >
+                    Edit tags
+                  </button>
+                  {canEditPostText ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={ownerActionBusy || !supabase}
+                      className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                      onClick={handleOpenEditText}
+                    >
+                      Edit text
+                    </button>
+                  ) : null}
+                  {canEditPostMedia ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      disabled={ownerActionBusy || !supabase}
+                      className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                      onClick={handleOpenEditMedia}
+                    >
+                      Edit photos
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={ownerActionBusy || !supabase}
+                    className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
+                    onClick={() => void handleOwnerDelete()}
+                  >
+                    {deleteBusy ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        {process.env.NODE_ENV === "development" &&
+        typeof post.anchor_note_comment_count === "number" &&
+        post.anchor_note_comment_count !== post.note_comment_count ? (
+          <span
+            className="mt-1.5 block text-[0.625rem] leading-tight text-text-muted/70 font-mono tabular-nums"
+            title="Diagnostic: hydrated thread-root vs anchor-scoped note comment counts (development only)"
+          >
+            dev: notes root {post.note_comment_count} / anchor {post.anchor_note_comment_count}
+          </span>
+        ) : null}
+      </div>
+    </>
+  );
+
   return (
     <article id={postElementDomId(post.id)} className="qrtz-card max-md:p-3">
+      {useTopLevelOriginalImageLayout ? (
+        <>
+          <div className="flex gap-2 sm:gap-3">
+            <ProfileAvatar url={primaryAvatarUrl} label={primary} size="md" className="mt-px" />
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-start justify-between gap-x-2 gap-y-0">
+                <div className="min-w-0 flex-1">
+                  <p className="font-heading text-base font-semibold leading-snug max-md:leading-tight tracking-tight text-text">
+                    <ProfileUsernameLink usernameRaw={primaryRaw} className="font-semibold text-inherit">
+                      {primary}
+                    </ProfileUsernameLink>
+                  </p>
+                  {headerVia ? (
+                    <p className="mt-0.5 max-md:mt-1 text-[0.8125rem] max-md:text-[0.75rem] leading-snug max-md:leading-normal text-text-secondary">
+                      <span className="font-normal text-text-muted max-md:text-text-muted/90">via </span>
+                      <ProfileUsernameLink
+                        usernameRaw={headerVia.primaryRaw}
+                        className="font-normal text-text-secondary hover:text-link"
+                      >
+                        @{headerVia.primary}
+                      </ProfileUsernameLink>
+                    </p>
+                  ) : null}
+                </div>
+                {headerShowSource && headerSource ? (
+                  <p className="mt-px max-w-[42%] shrink-0 truncate text-right text-[0.8125rem] max-md:max-w-[45%] max-md:text-[0.6875rem] leading-snug text-text-muted max-md:text-text-muted/95">
+                    <span className="font-normal">Source: </span>
+                    <ProfileUsernameLink
+                      usernameRaw={headerSource.primaryRaw}
+                      className="font-normal text-text-secondary hover:text-link"
+                    >
+                      @{headerSource.primary}
+                    </ProfileUsernameLink>
+                  </p>
+                ) : null}
+              </div>
+              {post.homeFollowingMatchedTag ? (
+                <p className="mt-1.5 max-md:mt-2 text-meta max-md:text-[0.6875rem] max-md:leading-snug text-text-muted max-md:text-text-muted/95">
+                  From tag you follow:{" "}
+                  <Link
+                    href={`/tag/${encodeURIComponent(post.homeFollowingMatchedTag)}`}
+                    className="font-medium text-link/90 hover:text-link-hover hover:underline"
+                  >
+                    #{post.homeFollowingMatchedTag}
+                  </Link>
+                </p>
+              ) : null}
+              {ungatedCommentary ? (
+                <div className={COMMENTARY_ADDED_LAYER_CLASS}>
+                  <LinkedPostText
+                    text={ungatedCommentary}
+                    className="text-[0.9375rem] leading-relaxed text-text"
+                  />
+                </div>
+              ) : quoteLayer && commentary && !showNestedQuote ? (
+                <div className={COMMENTARY_ADDED_LAYER_CLASS}>
+                  <LinkedPostText
+                    text={commentary}
+                    className="text-[0.9375rem] leading-relaxed text-text"
+                  />
+                </div>
+              ) : null}
+            </div>
+          </div>
+          {nsfwFeedBodyHidden ? (
+            <div className="flex gap-2 sm:gap-3">
+              <div className={TOP_LEVEL_ORIGINAL_AVATAR_SPACER_CLASS} aria-hidden />
+              <div className="min-w-0 flex-1">
+                <NsfwFeedContentWarning onReveal={() => setNsfwRevealed(true)} />
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className={TOP_LEVEL_ORIGINAL_MEDIA_WRAPPER_CLASS}>
+                <PostMediaGallery
+                  supabase={supabase}
+                  post={post}
+                  variant="feed"
+                  wrapperClassName="mt-2.5"
+                  imageClassName={TOP_LEVEL_ORIGINAL_MEDIA_IMG_CLASS}
+                />
+              </div>
+              <div className="flex gap-2 sm:gap-3">
+                <div className={TOP_LEVEL_ORIGINAL_AVATAR_SPACER_CLASS} aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <LinkedPostText
+                    text={post.content}
+                    className="mb-1.5 mt-2.5 text-base leading-relaxed text-text"
+                  />
+                </div>
+              </div>
+            </>
+          )}
+          <div className="flex gap-2 sm:gap-3">
+            <div className={TOP_LEVEL_ORIGINAL_AVATAR_SPACER_CLASS} aria-hidden />
+            <div className="min-w-0 flex-1">{postCardTail}</div>
+          </div>
+        </>
+      ) : (
       <div className="flex gap-2 sm:gap-3">
         <ProfileAvatar url={primaryAvatarUrl} label={primary} size="md" className="mt-px" />
         <div className="min-w-0 flex-1">
@@ -1272,319 +1702,10 @@ export default function PostCard({
               ) : null}
             </>
           )}
-          {tags.length > 0 ? (
-            <ul className="mt-2.5 max-md:mt-2 flex list-none flex-nowrap items-start gap-x-1.5 gap-y-0 max-md:gap-x-1 p-0">
-              <li className="min-w-0 flex-1">
-                <div
-                  ref={tagsClipRef}
-                  className={
-                    tagsExpanded
-                      ? undefined
-                      : "overflow-hidden max-h-[2.375rem] md:max-h-[2.125rem]"
-                  }
-                >
-                  <ul className="flex list-none flex-wrap gap-1.5 max-md:gap-1 p-0">
-                    {tags.map((t) => (
-                      <li key={t}>
-                        <Link
-                          href={`/tag/${encodeURIComponent(t)}`}
-                          className={`${TAG_CHIP_BASE} ${TAG_CHIP_MOBILE_SHELL} ${
-                            highlightSet?.has(t)
-                              ? `${TAG_CHIP_HIGHLIGHT} ${TAG_CHIP_HIGHLIGHT_MOBILE_SOFT}`
-                              : `${TAG_CHIP_DEFAULT} ${TAG_CHIP_DEFAULT_MOBILE_SOFT}`
-                          }`}
-                        >
-                          #{t}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </li>
-              {tagsOverflowing || tagsExpanded ? (
-                <li className="inline-flex shrink-0 items-center self-start pt-px max-md:pt-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setTagsExpanded((v) => !v)}
-                    className="inline-flex min-h-[1.5rem] max-md:min-h-[1.75rem] items-center rounded-full border border-transparent px-2 py-0.5 max-md:px-1.5 max-md:py-px text-meta font-medium leading-snug text-text-secondary/90 underline-offset-2 transition-[color,background-color,border-color] duration-200 ease-out hover:border-border/50 hover:bg-bg-secondary/45 hover:text-link focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 max-md:text-[0.6875rem] max-md:font-normal max-md:leading-snug"
-                    aria-expanded={tagsExpanded}
-                  >
-                    {tagsExpanded ? "Show less" : "Show more"}
-                  </button>
-                </li>
-              ) : null}
-            </ul>
-          ) : null}
-          <InlineErrorBanner
-            message={likeError}
-            onDismiss={dismissLikeError}
-            className="mt-2.5"
-          />
-          <InlineErrorBanner
-            message={deleteError}
-            onDismiss={() => setDeleteError(null)}
-            className="mt-2.5"
-          />
-          <InlineErrorBanner
-            message={quickReblogError}
-            onDismiss={() => setQuickReblogError(null)}
-            className="mt-2.5"
-          />
-          <div className="mt-2.5 border-t border-border/45 pt-2.5 sm:mt-3 sm:pt-3">
-            <div className="flex min-w-0 items-center gap-3">
-              <button
-                type="button"
-                disabled={!supabase}
-                onClick={() => {
-                  setNotesModalShowComposer(false);
-                  setNotesModalFocusComposer(false);
-                  setNotesModalOpen(true);
-                }}
-                className={`${REBLOG_ACTION_CLASS} ${REBLOG_ACTION_ROW_COMPACT} touch-manipulation select-none text-left font-normal text-text-muted max-md:text-text-muted/90 disabled:pointer-events-none disabled:opacity-45`}
-                aria-haspopup="dialog"
-                aria-expanded={notesModalOpen}
-                aria-label={`View notes${notesTriggerTotal ? ` (${notesTriggerTotal})` : ""}`}
-                title={!supabase ? "Notes unavailable" : undefined}
-              >
-                <span className="tabular-nums">
-                  {notesTriggerTotal} {notesTriggerTotal === 1 ? "note" : "notes"}
-                </span>
-              </button>
-              {showNsfwUnGatedBadge ? (
-                <span
-                  className="shrink-0 rounded-full border border-border/60 bg-bg-secondary/65 px-2 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-text-muted/90 dark:border-border/50 dark:bg-bg-secondary/80"
-                  title="Mature content"
-                  aria-label="Mature content (NSFW)"
-                >
-                  NSFW
-                </span>
-              ) : null}
-              <time
-                dateTime={post.created_at}
-                title={postTime.full}
-                aria-label={postTime.full}
-                className="ml-auto max-w-[11rem] shrink-0 truncate text-right text-meta font-normal tabular-nums tracking-tight text-text-muted max-md:max-w-[9.25rem] max-md:text-[0.6875rem] max-md:tracking-normal max-md:text-text-muted/95"
-              >
-                {postTime.label}
-              </time>
-            </div>
-
-            <div className={FOOTER_ACTIONS_ROW}>
-              <button
-                type="button"
-                disabled={!currentUserId || likeBusy}
-                onClick={() => void toggleLike()}
-                className={`inline-flex min-h-[2rem] min-w-0 shrink-0 touch-manipulation select-none items-center justify-center gap-1.5 rounded-md px-2 py-1 text-meta font-medium transition-[color,transform] duration-200 ease-out focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 focus-visible:ring-offset-0 active:scale-95 disabled:pointer-events-none ${LIKE_ACTION_ROW_COMPACT} ${
-                  !currentUserId ? "cursor-not-allowed disabled:opacity-45" : "disabled:opacity-100"
-                } ${likeBusy ? "cursor-wait" : currentUserId ? "cursor-pointer" : ""} ${
-                  liked ? "text-accent-pink" : "text-text-secondary hover:text-text"
-                }`}
-                aria-pressed={liked}
-                aria-busy={likeBusy}
-                aria-label={currentUserId ? (liked ? "Unlike" : "Like") : "Sign in to like"}
-                title={currentUserId ? undefined : "Sign in to like"}
-              >
-                <span
-                  className={`inline-flex h-6 w-6 shrink-0 origin-center items-center justify-center will-change-transform ${
-                    liked
-                      ? "scale-110 transition-transform duration-200 ease-[cubic-bezier(0.175,0.885,0.32,1.275)]"
-                      : "scale-100 transition-transform duration-200 ease-out"
-                  }`}
-                  aria-hidden
-                >
-                  <HeartIcon active={liked} className={ICON_BOX} />
-                </span>
-                <span className="hidden sm:inline">{liked ? "Unlike" : "Like"}</span>
-              </button>
-
-              {showReblog ? (
-                <>
-                  <button
-                    type="button"
-                    disabled={rebloggingId !== null || reblogModalBusy}
-                    onClick={() => {
-                      setReblogModalError(null);
-                      setQuickReblogError(null);
-                      setReblogModalPost(post);
-                    }}
-                    className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
-                      reblogModalBusy
-                        ? "cursor-wait border-border/45 bg-bg-secondary/50 opacity-95 ring-1 ring-border/40"
-                        : "cursor-pointer"
-                    }`}
-                    aria-busy={reblogModalBusy}
-                    aria-label={
-                      reblogModalBusy
-                        ? "Publishing reblog with commentary or tags"
-                        : "Reblog — add optional commentary and tags"
-                    }
-                    title="Reblog to your blog; add optional commentary and tags"
-                  >
-                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
-                      <QuoteBubbleIcon className={ICON_BOX} />
-                    </span>
-                    <span className="hidden sm:inline">{reblogModalBusy ? "Reblogging…" : "Reblog"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    disabled={rebloggingId !== null || reblogModalBusy}
-                    onClick={() => {
-                      setQuickReblogError(null);
-                      setReblogModalError(null);
-                      void onReblog(post, null, undefined, undefined, undefined, {
-                        onError: (msg) => setQuickReblogError(msg),
-                      });
-                    }}
-                    className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none ${
-                      rebloggingId === post.id
-                        ? "cursor-wait bg-bg-secondary/40 opacity-90 ring-1 ring-border/35"
-                        : "cursor-pointer"
-                    }`}
-                    aria-busy={rebloggingId === post.id}
-                    aria-label={
-                      rebloggingId === post.id
-                        ? "Instant reblogging, no commentary or tags"
-                        : "Instant reblog — skip editor, no commentary or tags"
-                    }
-                    title="Instant reblog without opening the editor"
-                  >
-                    <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
-                      <RepostStatIcon className={ICON_BOX} />
-                    </span>
-                    <span className="hidden sm:inline">{rebloggingId === post.id ? "Quick reblogging…" : "Quick"}</span>
-                  </button>
-                </>
-              ) : null}
-
-              <button
-                type="button"
-                disabled={!supabase}
-                onClick={() => {
-                  setNotesModalShowComposer(true);
-                  setNotesModalFocusComposer(true);
-                  setNotesModalOpen(true);
-                }}
-                className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 touch-manipulation select-none disabled:pointer-events-none disabled:opacity-45`}
-                aria-haspopup="dialog"
-                aria-expanded={notesModalOpen}
-                aria-label="Leave a short note on this thread"
-                title={!supabase ? "Notes unavailable" : "Leave a short note — opens Notes with the composer ready"}
-              >
-                <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
-                  <ShortNoteComposeIcon className={ICON_BOX} />
-                </span>
-                <span className="hidden sm:inline">Note</span>
-              </button>
-
-              {!hidePermalink ? (
-                <Link
-                  href={postPermalinkPath(post.id)}
-                  className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] shrink-0 text-text-secondary/90 underline-offset-2 hover:bg-bg-secondary/60 hover:text-link hover:underline max-md:text-[0.6875rem]`}
-                  title="Open post page (shareable link)"
-                  aria-label="Open post permalink"
-                  prefetch={false}
-                >
-                  <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center text-text-secondary" aria-hidden>
-                    <PermalinkChainIcon className={ICON_BOX} />
-                  </span>
-                  <span className="hidden sm:inline">Link</span>
-                </Link>
-              ) : null}
-
-              {isOwner ? (
-                <div className="ml-auto shrink-0">
-                  <div className={`${ownerActionBusy ? "pointer-events-none opacity-60" : ""}`}>
-                    <button
-                      ref={ownerMenuButtonRef}
-                      type="button"
-                      className={`${FOOTER_SECONDARY_ACTION_CLASS} min-h-[2rem] ${
-                        ownerActionBusy ? "cursor-not-allowed" : "cursor-pointer"
-                      }`}
-                      aria-label="Post options"
-                      aria-busy={ownerActionBusy}
-                      aria-haspopup="menu"
-                      aria-expanded={ownerMenuOpen}
-                      onClick={() => {
-                        if (ownerActionBusy) return;
-                        setOwnerMenuOpen((v) => !v);
-                      }}
-                    >
-                      <span
-                        aria-hidden
-                        className="text-[1.6875rem] leading-none tracking-tight max-md:text-text-secondary/85"
-                      >
-                        ⋯
-                      </span>
-                    </button>
-                  </div>
-                  {ownerMenuOpen && ownerMenuPos ? (
-                    <div
-                      ref={ownerMenuPopoverRef}
-                      role="menu"
-                      className="fixed z-10 w-40 max-w-[calc(100vw-1rem)] -translate-x-full rounded-md border border-border/60 bg-bg-secondary py-0.5 shadow-md"
-                      style={{ top: ownerMenuPos.top, left: ownerMenuPos.left }}
-                      onClick={(e) => e.stopPropagation()}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={ownerActionBusy || !supabase}
-                        className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
-                        onClick={handleOpenEditTags}
-                      >
-                        Edit tags
-                      </button>
-                      {canEditPostText ? (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          disabled={ownerActionBusy || !supabase}
-                          className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
-                          onClick={handleOpenEditText}
-                        >
-                          Edit text
-                        </button>
-                      ) : null}
-                      {canEditPostMedia ? (
-                        <button
-                          type="button"
-                          role="menuitem"
-                          disabled={ownerActionBusy || !supabase}
-                          className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-text hover:bg-bg-secondary/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
-                          onClick={handleOpenEditMedia}
-                        >
-                          Edit photos
-                        </button>
-                      ) : null}
-                      <button
-                        type="button"
-                        role="menuitem"
-                        disabled={ownerActionBusy || !supabase}
-                        className="flex w-full min-h-[2rem] items-center px-2 py-1.5 text-left text-sm font-medium leading-snug text-error hover:bg-error/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-border-focus/50 disabled:opacity-50"
-                        onClick={() => void handleOwnerDelete()}
-                      >
-                        {deleteBusy ? "Deleting…" : "Delete"}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-
-            {process.env.NODE_ENV === "development" &&
-            typeof post.anchor_note_comment_count === "number" &&
-            post.anchor_note_comment_count !== post.note_comment_count ? (
-              <span
-                className="mt-1.5 block text-[0.625rem] leading-tight text-text-muted/70 font-mono tabular-nums"
-                title="Diagnostic: hydrated thread-root vs anchor-scoped note comment counts (development only)"
-              >
-                dev: notes root {post.note_comment_count} / anchor {post.anchor_note_comment_count}
-              </span>
-            ) : null}
-          </div>
+          {postCardTail}
         </div>
       </div>
+      )}
       {/* Notes: thread-root likes/reblogs; comment scope via NEXT_PUBLIC_NOTES_COMMENT_SCOPE (default thread). */}
       <PostNotesModal
         open={notesModalOpen}
